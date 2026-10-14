@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { BookOpen } from 'lucide-react';
 
 export function TopHeader() {
   const pathname = usePathname();
@@ -44,9 +45,16 @@ export function TopHeader() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => window.location.reload()} className="text-[11px] text-slate-400 hover:text-slate-700">更新</button>
+          <Link
+            href="/help"
+            className="flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-2 py-0.5 rounded-full transition active:scale-95"
+            title="使い方マニュアル"
+          >
+            <BookOpen className="w-3 h-3 text-emerald-600" />
+            <span>マニュアル</span>
+          </Link>
           <span className="text-slate-300 text-xs">|</span>
-          <span className="text-xs text-slate-400 font-mono">✕</span>
+          <button onClick={() => window.location.reload()} className="text-[11px] text-slate-400 hover:text-slate-700">更新</button>
         </div>
       </header>
 
