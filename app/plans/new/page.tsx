@@ -6,7 +6,8 @@ import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ChevronLeft, ChevronRight, CheckCircle2, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
-import { ensureSupabaseSession } from '@/lib/supabase/auth';
+import { getCurrentUserId } from '@/lib/supabase/auth';
+import { useLiff } from '@/components/liff-provider';
 import { planWizardSchema, type PlanWizardFormData } from '@/lib/validations/plan';
 
 import { Step1Objective } from '@/components/plan-wizard/step1-objective';
@@ -15,6 +16,7 @@ import { Step3Criteria } from '@/components/plan-wizard/step3-criteria';
 
 export default function NewPlanPage() {
   const router = useRouter();
+  const { user: liffUser } = useLiff();
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -62,14 +64,8 @@ export default function NewPlanPage() {
     setSubmitError(null);
 
     try {
-      // ユーザーIDを取得（セッション未確立時は自動・強制サインインを実行）
-      let currentUserId = '00000000-0000-0000-0000-000000000001';
-      try {
-        const authUser = await ensureSupabaseSession();
-        if (authUser?.id) {
-          currentUserId = authUser.id;
-        }
-      } catch {}
+      // ユーザーIDを取得（LIFFプロファイルまたはSupabaseセッションから特定）
+      const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
 
       let finalObjectiveId = data.selectedObjectiveId;
       let newPlanId = 'plan-' + Date.now();
@@ -127,6 +123,7 @@ export default function NewPlanPage() {
       if (typeof window !== 'undefined') {
         const localPlan = {
           id: newPlanId,
+          userId: currentUserId,
           title: data.actionPlan,
           status: 'in_progress',
           objectiveTitle: data.newObjectiveTitle || '目標設定',
