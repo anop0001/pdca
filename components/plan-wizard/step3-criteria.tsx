@@ -1,13 +1,16 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Gauge, Calendar, Flag } from 'lucide-react';
 import type { PlanWizardFormData } from '@/lib/validations/plan';
+import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export function Step3Criteria() {
   const { register, watch, setValue, formState: { errors } } = useFormContext<PlanWizardFormData>();
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
+  const actionPlan = watch('actionPlan');
   const targetValue = watch('targetValue');
   const unit = watch('unit');
   const operator = watch('operator');
@@ -146,6 +149,17 @@ export function Step3Criteria() {
             </button>
           ))}
         </div>
+
+        {/* カレンダー連携（完全無料通知） */}
+        <button
+          type="button"
+          onClick={() => setShowCalendarModal(true)}
+          className="w-full py-2.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-98 transition shadow-xs mt-2"
+        >
+          <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+          <span>評価期日をスマホカレンダーに登録</span>
+          <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">無料通知</span>
+        </button>
       </div>
 
       <div className="p-3.5 rounded-xl bg-emerald-50/80 border border-emerald-200 space-y-1">
@@ -161,6 +175,17 @@ export function Step3Criteria() {
           を達成基準とする」
         </p>
       </div>
+
+      {/* カレンダーリマインドモーダル */}
+      <CalendarReminderModal
+        isOpen={showCalendarModal}
+        onClose={() => setShowCalendarModal(false)}
+        options={{
+          title: actionPlan || 'PDCA目標アクション',
+          deadlineDate: deadline || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+          description: `目標値: ${targetValue || 1}${unit || '回'} の振り返り評価期日です。実績を確認して次のActionを決定しましょう！`,
+        }}
+      />
     </div>
   );
 }
