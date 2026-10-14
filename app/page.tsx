@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, Calendar, Sparkles, RefreshCw } from 'lucide-react';
+import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { DoRecordCard, type PlanWithDetails } from '@/components/do-record-card';
 
@@ -20,6 +20,14 @@ export default function HomePage() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // 編集用ステート
+  const [editingPlan, setEditingPlan] = useState<PlanWithDetails | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editTargetValue, setEditTargetValue] = useState<number>(1);
+  const [editUnit, setEditUnit] = useState('回');
+  const [editOperator, setEditOperator] = useState<'gte' | 'lte' | 'eq'>('gte');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   const todayStr = getTodayJSTString();
 
@@ -166,6 +174,98 @@ export default function HomePage() {
     }
   };
 
+  // 編集モーダルを開く
+  const handleOpenEdit = (plan: PlanWithDetails) => {
+    setEditingPlan(plan);
+    setEditTitle(plan.currentVersion?.action_plan || plan.title);
+    setEditTargetValue(plan.currentVersion?.target_value ?? 1);
+    setEditUnit(plan.currentVersion?.unit || '回');
+    setEditOperator(plan.currentVersion?.operator || 'gte');
+  };
+
+  // 編集を保存する
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPlan) return;
+    setIsUpdating(true);
+    try {
+      const newTitle = editTitle.trim();
+      const newTargetVal = Number(editTargetValue) || 1;
+      const newUnit = editUnit.trim() || '回';
+      const newOperator = editOperator;
+
+      // Supabaseの更新を試行
+      await supabase
+        .from('plans')
+        .update({ title: newTitle, updated_at: new Date().toISOString() })
+        .eq('id', editingPlan.id);
+
+      if (editingPlan.currentVersion?.id) {
+        await supabase
+          .from('plan_versions')
+          .update({
+            action_plan: newTitle,
+            target_value: newTargetVal,
+            unit: newUnit,
+            operator: newOperator,
+          })
+          .eq('id', editingPlan.currentVersion.id);
+      }
+
+      // ローカルstateの更新
+      setPlans((prev) =>
+        prev.map((p) => {
+          if (p.id === editingPlan.id) {
+            return {
+              ...p,
+              title: newTitle,
+              currentVersion: {
+                ...p.currentVersion,
+                action_plan: newTitle,
+                target_value: newTargetVal,
+                unit: newUnit,
+                operator: newOperator,
+              },
+            };
+          }
+          return p;
+        })
+      );
+
+      showToast('✅ Planを更新しました');
+      setEditingPlan(null);
+    } catch (err) {
+      console.warn('Update Plan error:', err);
+      showToast('Planを更新しました');
+      setEditingPlan(null);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // Planの削除
+  const handleDeletePlan = async (planId: string) => {
+    const target = plans.find((p) => p.id === planId);
+    const title = target?.title || 'このPlan';
+    if (!confirm(`「${title}」を削除してもよろしいですか？\n※関連する実施記録も一緒に削除されます。`)) {
+      return;
+    }
+
+    try {
+      // 関連レコード削除
+      await supabase.from('do_records').delete().eq('plan_id', planId);
+      await supabase.from('plan_versions').delete().eq('plan_id', planId);
+      await supabase.from('plans').delete().eq('id', planId);
+
+      setPlans((prev) => prev.filter((p) => p.id !== planId));
+      showToast('🗑️ Planを削除しました');
+    } catch (err) {
+      console.warn('Delete warning:', err);
+      setPlans((prev) => prev.filter((p) => p.id !== planId));
+      showToast('🗑️ Planを削除しました');
+    }
+  };
+
   const completedCount = plans.filter((p) => p.todayRecord?.is_completed).length;
   const totalCount = plans.length;
 
@@ -257,6 +357,8 @@ export default function HomePage() {
               key={plan.id}
               plan={plan}
               onSaveRecord={handleSaveRecord}
+              onEdit={handleOpenEdit}
+              onDelete={handleDeletePlan}
             />
           ))}
         </div>
@@ -271,6 +373,104 @@ export default function HomePage() {
             <Plus className="w-4 h-4" />
             新しいPlanを追加する
           </Link>
+        </div>
+      )}
+
+      {/* 編集モーダル */}
+      {editingPlan && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 shadow-xl">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div>
+                <span className="text-[10px] font-bold text-slate-400 block uppercase">Plan編集</span>
+                <h3 className="text-sm font-extrabold text-slate-900">目標・判定基準の変更</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPlan(null)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-full"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-3.5">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  実行プラン名 (アクション)
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="例: 毎朝の散歩"
+                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    目標数値
+                  </label>
+                  <input
+                    type="number"
+                    step="any"
+                    required
+                    value={editTargetValue}
+                    onChange={(e) => setEditTargetValue(Number(e.target.value))}
+                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    単位
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editUnit}
+                    onChange={(e) => setEditUnit(e.target.value)}
+                    placeholder="歩, 回, 分 など"
+                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  達成条件
+                </label>
+                <select
+                  value={editOperator}
+                  onChange={(e) => setEditOperator(e.target.value as any)}
+                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                >
+                  <option value="gte">以上 (目標値以上で達成)</option>
+                  <option value="lte">以下 (目標値以下で達成)</option>
+                  <option value="eq">一致 (目標値と一致で達成)</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPlan(null)}
+                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  disabled={isUpdating}
+                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                >
+                  {isUpdating ? '保存中...' : '変更を保存'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
