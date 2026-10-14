@@ -9,7 +9,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'idToken is required' }, { status: 400 });
     }
 
-    const liffChannelId = process.env.LINE_CHANNEL_ID;
+    const liffChannelId = process.env.LINE_CHANNEL_ID || process.env.NEXT_PUBLIC_LIFF_ID?.split('-')[0];
     if (!liffChannelId) {
       return NextResponse.json({ error: 'LINE_CHANNEL_ID is not configured' }, { status: 500 });
     }
