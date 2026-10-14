@@ -68,3 +68,24 @@ export async function ensureSupabaseSession(hint?: { userId?: string; displayNam
     return null;
   }
 }
+
+/**
+ * 現在のログインユーザーのID（UUID）を確実に取得する関数
+ */
+export async function getCurrentUserId(hint?: { userId?: string; displayName?: string }): Promise<string | null> {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user?.id) return user.id;
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) return session.user.id;
+
+    const authUser = await ensureSupabaseSession(hint);
+    if (authUser?.id) return authUser.id;
+
+    return null;
+  } catch (err) {
+    console.warn('getCurrentUserId warning:', err);
+    return null;
+  }
+}
