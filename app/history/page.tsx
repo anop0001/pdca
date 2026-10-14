@@ -19,6 +19,7 @@ import {
   TrendingUp
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { getCurrentUserId } from '@/lib/supabase/auth';
 
 interface ActionRecord {
   action_type: 'continue' | 'revise' | 'alternative' | 'terminate';
@@ -72,7 +73,12 @@ export default function HistoryPage() {
     async function fetchHistoryData() {
       setLoading(true);
       try {
-        const { data: { user } } = await supabase.auth.getUser();
+        const currentUserId = await getCurrentUserId();
+        if (!currentUserId) {
+          setObjectives([]);
+          setLoading(false);
+          return;
+        }
 
         const { data, error } = await supabase
           .from('objectives')
@@ -110,6 +116,7 @@ export default function HistoryPage() {
               )
             )
           `)
+          .eq('user_id', currentUserId)
           .order('created_at', { ascending: false });
 
         if (error) {
