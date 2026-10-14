@@ -1,326 +1,112 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { Users, CheckCircle2, RefreshCw, UserPlus, Link as LinkIcon, Sparkles, X, Copy, Check, Trash2 } from 'lucide-react';
-import { ReviewModal, type ReviewTargetData } from '@/components/ReviewModal';
+import { Users, CheckCircle2, RefreshCw, UserPlus, Sparkles, Check, AlertTriangle, MessageSquare } from 'lucide-react';
 
-interface TeamTaskItem {
-  planId: string;
-  planTitle: string;
-  memberId: string;
-  memberName: string;
+interface TeamTask {
+  id: string;
+  name: string;
+  plan: string;
   status: 'check_pending' | 'revision_requested' | 'confirmed';
-  deadline: string;
-  latestReviewComment?: string;
-  rawTargetData: ReviewTargetData;
+  actual: string;
+  comment?: string;
 }
 
-interface TeamMember {
-  id: string;
-  name: string;
-  role: 'manager' | 'member';
-  planTitle?: string;
-  joinedAt: string;
-}
+export default function TeamPage() {
+  const [teamName, setTeamName] = useState<string>('');
+  const [tasks, setTasks] = useState<TeamTask[]>([]);
+  const [filter, setFilter] = useState<'all' | 'check_pending' | 'revision_requested' | 'confirmed'>('all');
+  const [showAdd, setShowAdd] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [newPlan, setNewPlan] = useState('');
+  const [reviewingTask, setReviewingTask] = useState<TeamTask | null>(null);
+  const [reviewComment, setReviewComment] = useState('');
 
-interface Organization {
-  id: string;
-  name: string;
-  inviteCode: string;
-}
-
-const STORAGE_KEY_TEAM = 'pdca_team_info';
-const STORAGE_KEY_MEMBERS = 'pdca_team_members';
-const STORAGE_KEY_TASKS = 'pdca_team_tasks';
-
-function notifyBadgeUpdate() {
-  if (typeof window !== 'undefined') window.dispatchEvent(new Event('pdca_tasks_updated'));
-}
-
-export default function TeamDashboardPage() {
-  const [org, setOrg] = useState<Organization | null>(null);
-  const [members, setMembers] = useState<TeamMember[]>([]);
-  const [tasks, setTasks] = useState<TeamTaskItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'stalls' | 'members'>('stalls');
-  const [currentFilter, setCurrentFilter] = useState<'all' | 'check_pending' | 'revision_requested' | 'confirmed'>('all');
-
-  const [selectedTask, setSelectedTask] = useState<ReviewTargetData | null>(null);
-  const [showAddMemberModal, setShowAddMemberModal] = useState(false);
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
-
-  const [teamNameInput, setTeamNameInput] = useState('');
-  const [memberNameInput, setMemberNameInput] = useState('');
-  const [memberPlanInput, setMemberPlanInput] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+  const sync = (tList: TeamTask[], tName: string) => {
+    setTasks(tList);
+    setTeamName(tName);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('pdca_team_info', JSON.stringify({ name: tName }));
+      localStorage.setItem('pdca_team_tasks', JSON.stringify(tList));
+      window.dispatchEvent(new Event('pdca_tasks_updated'));
+    }
   };
 
-  const loadDemoData = useCallback(() => {
-    const demoOrg: Organization = { id: 'demo-org-anop', name: 'ANOP セールスチーム', inviteCode: 'ANOP-2026' };
-    const demoMembers: TeamMember[] = [
-      { id: 'm-0', name: 'あなた (管理者)', role: 'manager', joinedAt: '2026-10-01' },
-      { id: 'm-1', name: '田中 健太', role: 'member', planTitle: '新規架電アプローチ (目標: 20件/日)', joinedAt: '2026-10-05' },
-      { id: 'm-2', name: '佐藤 茜', role: 'member', planTitle: '商談後の即時議事録送付', joinedAt: '2026-10-07' },
-      { id: 'm-3', name: '山田 太郎', role: 'member', planTitle: '毎日3件の既存フォロー連絡', joinedAt: '2026-10-09' },
+  const loadDemo = useCallback(() => {
+    const demo: TeamTask[] = [
+      { id: '1', name: '田中 健太', plan: '新規架電アプローチ (毎日20件)', status: 'check_pending', actual: '期間合計85件 / 未達 ⚠️' },
+      { id: '2', name: '佐藤 茜', plan: '商談後の即時議事録送付', status: 'revision_requested', actual: '期間内3回 / 未達 ⚠️', comment: '目標値の具体化を依頼中' },
+      { id: '3', name: '山田 太郎', plan: '毎日3件の既存フォロー連絡', status: 'confirmed', actual: '期間合計21件 / 達成 🎉', comment: '素晴らしい継続力です！' },
     ];
-    const demoTasks: TeamTaskItem[] = [
-      {
-        planId: 'plan-tanaka',
-        planTitle: '新規架電アプローチ (目標: 20件/日)',
-        memberId: 'm-1',
-        memberName: '田中 健太',
-        status: 'check_pending',
-        deadline: '2026-10-18',
-        rawTargetData: {
-          planId: 'plan-tanaka',
-          planTitle: '新規架電アプローチ',
-          memberName: '田中 健太',
-          versionNumber: 1,
-          actionPlan: '確度の高い見込み先リストに対し、毎日20件の架電を行う',
-          targetValue: 20,
-          unit: '件',
-          operator: 'gte',
-          deadline: '2026-10-18',
-          totalActual: 85,
-          recordedDays: 7,
-          isAchieved: false,
-          actualSummary: 'トークスクリプト改善前で受付ブロックが多く未達',
-          actionType: 'revise',
-          actionReason: '短縮版スクリプトへ変更して受付突破率を向上',
-        },
-      },
-      {
-        planId: 'plan-sato',
-        planTitle: '商談後の即時議事録送付',
-        memberId: 'm-2',
-        memberName: '佐藤 茜',
-        status: 'revision_requested',
-        deadline: '2026-10-15',
-        latestReviewComment: '目標値の具体化を依頼中: 「商談後30分以内」等の明確な時間を設定しましょう。',
-        rawTargetData: {
-          planId: 'plan-sato',
-          planTitle: '商談後の即時議事録送付',
-          memberName: '佐藤 茜',
-          versionNumber: 1,
-          actionPlan: '全商談終了後、当日のうちに顧客へ要点サマリーメールを送る',
-          targetValue: 1,
-          unit: '回',
-          operator: 'gte',
-          deadline: '2026-10-15',
-          totalActual: 3,
-          recordedDays: 5,
-          isAchieved: false,
-          actualSummary: '連続商談が重なった日に当日送信が漏れた',
-          actionType: 'revise',
-          actionReason: '商談スロット間に15分のバッファを確保する',
-        },
-      },
-      {
-        planId: 'plan-yamada',
-        planTitle: '毎日3件の既存フォロー連絡',
-        memberId: 'm-3',
-        memberName: '山田 太郎',
-        status: 'confirmed',
-        deadline: '2026-10-20',
-        latestReviewComment: '素晴らしい継続力です！この調子で今週も完走しましょう。',
-        rawTargetData: {
-          planId: 'plan-yamada',
-          planTitle: '既存フォロー連絡',
-          memberName: '山田 太郎',
-          versionNumber: 1,
-          actionPlan: '休眠顧客リストから毎日3件選んで近況確認を送る',
-          targetValue: 3,
-          unit: '件',
-          operator: 'gte',
-          deadline: '2026-10-20',
-          totalActual: 21,
-          recordedDays: 7,
-          isAchieved: true,
-          actualSummary: '毎日午前中に固定で連絡し、目標21件を完全達成！',
-          actionType: 'continue',
-        },
-      },
-    ];
-
-    setOrg(demoOrg);
-    setMembers(demoMembers);
-    setTasks(demoTasks);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_TEAM, JSON.stringify(demoOrg));
-      localStorage.setItem(STORAGE_KEY_MEMBERS, JSON.stringify(demoMembers));
-      localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(demoTasks));
-    }
-    notifyBadgeUpdate();
-    showToast('⚡ デモ用メンバー（田中・佐藤・山田）を読み込みました！');
-  }, []);
-
-  const fetchTeamData = useCallback(() => {
-    setLoading(true);
-    try {
-      if (typeof window !== 'undefined') {
-        const cachedOrg = localStorage.getItem(STORAGE_KEY_TEAM);
-        const cachedMembers = localStorage.getItem(STORAGE_KEY_MEMBERS);
-        const cachedTasks = localStorage.getItem(STORAGE_KEY_TASKS);
-        if (cachedOrg) {
-          setOrg(JSON.parse(cachedOrg));
-          if (cachedMembers) setMembers(JSON.parse(cachedMembers));
-          if (cachedTasks) setTasks(JSON.parse(cachedTasks));
-        }
-      }
-    } finally {
-      setLoading(false);
-      notifyBadgeUpdate();
-    }
+    sync(demo, 'ANOP セールスチーム');
   }, []);
 
   useEffect(() => {
-    fetchTeamData();
-  }, [fetchTeamData]);
-
-  const handleCreateTeam = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!teamNameInput.trim()) return;
-    const code = 'TEAM-' + Math.random().toString(36).substring(2, 6).toUpperCase();
-    const newOrg: Organization = { id: 'org-' + Date.now(), name: teamNameInput.trim(), inviteCode: code };
-    const initialMembers: TeamMember[] = [{ id: 'm-mgr', name: 'あなた (管理者)', role: 'manager', joinedAt: new Date().toISOString().split('T')[0] }];
-    setOrg(newOrg);
-    setMembers(initialMembers);
-    setTasks([]);
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_TEAM, JSON.stringify(newOrg));
-      localStorage.setItem(STORAGE_KEY_MEMBERS, JSON.stringify(initialMembers));
-      localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify([]));
+      const savedInfo = localStorage.getItem('pdca_team_info');
+      const savedTasks = localStorage.getItem('pdca_team_tasks');
+      if (savedInfo) setTeamName(JSON.parse(savedInfo).name || '');
+      if (savedTasks) setTasks(JSON.parse(savedTasks));
     }
-    notifyBadgeUpdate();
-    setShowCreateTeamModal(false);
-    setTeamNameInput('');
-    showToast(`🎉 チーム「${newOrg.name}」を開設しました！`);
-  };
+  }, []);
 
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!memberNameInput.trim() || !org) return;
-    const memberId = 'm-' + Date.now();
-    const planTitle = memberPlanInput.trim() || '日次業務の目標達成';
-    const newMember: TeamMember = { id: memberId, name: memberNameInput.trim(), role: 'member', planTitle, joinedAt: new Date().toISOString().split('T')[0] };
-    const newTask: TeamTaskItem = {
-      planId: 'plan-' + Date.now(),
-      planTitle,
-      memberId,
-      memberName: newMember.name,
+    if (!newName.trim()) return;
+    const newTask: TeamTask = {
+      id: String(Date.now()),
+      name: newName.trim(),
+      plan: newPlan.trim() || '日次業務の目標達成',
       status: 'check_pending',
-      deadline: '2026-10-31',
-      rawTargetData: {
-        planId: 'plan-' + Date.now(),
-        planTitle,
-        memberName: newMember.name,
-        versionNumber: 1,
-        actionPlan: planTitle,
-        targetValue: 1,
-        unit: '回',
-        operator: 'gte',
-        deadline: '2026-10-31',
-        totalActual: 0,
-        recordedDays: 3,
-        isAchieved: false,
-        actualSummary: '初期サイクル進行中（要確認）',
-        actionType: 'continue',
-      },
+      actual: '初期サイクル進行中',
     };
-    const updatedMembers = [...members, newMember];
-    const updatedTasks = [newTask, ...tasks];
-    setMembers(updatedMembers);
-    setTasks(updatedTasks);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_MEMBERS, JSON.stringify(updatedMembers));
-      localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(updatedTasks));
-    }
-    notifyBadgeUpdate();
-    setShowAddMemberModal(false);
-    setMemberNameInput('');
-    setMemberPlanInput('');
-    showToast(`👤 メンバー「${newMember.name}」を追加しました！`);
+    sync([newTask, ...tasks], teamName || 'マイPDCAチーム');
+    setNewName('');
+    setNewPlan('');
+    setShowAdd(false);
   };
 
-  const handleDeleteMember = (memberId: string) => {
-    if (!confirm('このメンバーをチームから解除しますか？')) return;
-    const updatedMembers = members.filter((m) => m.id !== memberId);
-    const updatedTasks = tasks.filter((t) => t.memberId !== memberId);
-    setMembers(updatedMembers);
-    setTasks(updatedTasks);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_MEMBERS, JSON.stringify(updatedMembers));
-      localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(updatedTasks));
-    }
-    notifyBadgeUpdate();
-    showToast('メンバーを解除しました。');
-  };
-
-  const handleReviewSubmitted = (actionType?: string, comment?: string) => {
-    if (!selectedTask) return;
-    const nextStatus = actionType === 'revision_requested' ? 'revision_requested' : 'confirmed';
-    const updatedTasks: TeamTaskItem[] = tasks.map((t) =>
-      t.planId === selectedTask.planId ? { ...t, status: nextStatus, latestReviewComment: comment || 'レビュー完了' } : t
+  const handleReviewSubmit = (status: 'confirmed' | 'revision_requested') => {
+    if (!reviewingTask) return;
+    const updated = tasks.map((t) =>
+      t.id === reviewingTask.id
+        ? { ...t, status, comment: reviewComment.trim() || (status === 'confirmed' ? '確認完了しました！' : '修正をお願いします') }
+        : t
     );
-    setTasks(updatedTasks);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEY_TASKS, JSON.stringify(updatedTasks));
-    }
-    notifyBadgeUpdate();
-    setSelectedTask(null);
-    showToast(nextStatus === 'confirmed' ? '✅ レビュー（確認完了）を送信しました！' : '💬 修正依頼を送信しました！');
+    sync(updated, teamName);
+    setReviewingTask(null);
+    setReviewComment('');
   };
 
-  const handleCopyInvite = () => {
-    if (!org) return;
-    const url = typeof window !== 'undefined' ? `${window.location.origin}/join?code=${org.inviteCode}` : '';
-    navigator.clipboard.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const checkPendingCount = tasks.filter((t) => t.status === 'check_pending').length;
-  const revisionCount = tasks.filter((t) => t.status === 'revision_requested').length;
-  const confirmedCount = tasks.filter((t) => t.status === 'confirmed').length;
-  const filteredTasks = currentFilter === 'all' ? tasks : tasks.filter((t) => t.status === currentFilter);
+  const checkPending = tasks.filter((t) => t.status === 'check_pending').length;
+  const revision = tasks.filter((t) => t.status === 'revision_requested').length;
+  const confirmed = tasks.filter((t) => t.status === 'confirmed').length;
+  const filtered = filter === 'all' ? tasks : tasks.filter((t) => t.status === filter);
 
   return (
     <div className="max-w-md mx-auto space-y-4 pb-16 animate-in fade-in duration-200">
-      {toastMessage && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white text-xs px-4 py-2.5 rounded-full shadow-lg flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-emerald-400" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      {!org ? (
-        <div className="p-5 rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50/70 via-white to-teal-50/50 shadow-sm space-y-4">
+      {!teamName ? (
+        <div className="p-5 rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50 space-y-4">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold text-base shadow-sm">👑</div>
+            <div className="w-8 h-8 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold">👑</div>
             <div>
-              <span className="text-[10px] font-bold text-emerald-700 block uppercase tracking-wider">チーム管理機能</span>
+              <span className="text-[10px] font-bold text-emerald-700 block uppercase">チーム管理機能</span>
               <h1 className="text-base font-extrabold text-slate-900">管理者登録 & チーム開設</h1>
             </div>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            直属メンバーのPDCAサイクルの<strong>滞り（未達・評価遅れ）</strong>をリアルタイムに検知し、問いかけやレビューを行うダッシュボードです。
+            直属メンバーのPDCAサイクルの滞りをリアルタイムに検知し、レビューを行うダッシュボードです。
           </p>
-          <div className="space-y-2 pt-1">
+          <div className="space-y-2">
             <button
-              onClick={() => setShowCreateTeamModal(true)}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:scale-98 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+              onClick={() => sync([], 'ANOP チーム')}
+              className="w-full py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700"
             >
-              <span>＋ 新しいチームを開設して管理者になる</span>
+              ＋ 新しいチームを開設して管理者になる
             </button>
             <button
-              onClick={loadDemoData}
-              className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-98 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-sm"
+              onClick={loadDemo}
+              className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 flex items-center justify-center gap-1"
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>⚡ デモ用メンバー（田中・佐藤・山田）を読み込む</span>
@@ -332,256 +118,161 @@ export default function TeamDashboardPage() {
           <div className="flex items-center justify-between pt-1">
             <div>
               <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span>{org.name}（メンバー {members.length}名）</span>
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span>{teamName}（メンバー {tasks.length}名）</span>
               </div>
               <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">サイクルの滞り検知</h1>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[10px] px-2 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold">管理者モード</span>
-              <button onClick={fetchTeamData} disabled={loading} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-full" title="更新">
-                <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
+            <span className="text-[10px] px-2 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold">管理者モード</span>
           </div>
 
           <div className="flex gap-2">
             <button
-              onClick={() => setShowAddMemberModal(true)}
-              className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm"
+              onClick={() => setShowAdd(!showAdd)}
+              className="flex-1 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1"
             >
               <UserPlus className="w-3.5 h-3.5" />
               <span>メンバー追加</span>
             </button>
             <button
-              onClick={() => setShowInviteModal(true)}
-              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1"
-            >
-              <LinkIcon className="w-3.5 h-3.5 text-slate-500" />
-              <span>招待コード</span>
-            </button>
-            <button
-              onClick={loadDemoData}
-              className="py-2 px-2.5 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold transition flex items-center justify-center"
-              title="デモ状態にリセット"
+              onClick={loadDemo}
+              className="py-2 px-3 bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1"
+              title="デモ状態を読込"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>デモ読込</span>
             </button>
           </div>
 
+          {showAdd && (
+            <form onSubmit={handleAddMember} className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2.5 animate-in fade-in">
+              <h3 className="text-xs font-bold text-slate-800">👤 メンバー登録</h3>
+              <input
+                type="text"
+                required
+                placeholder="メンバー氏名 (例: 伊藤 健一)"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="w-full p-2 text-xs border border-slate-300 rounded-xl bg-white"
+              />
+              <input
+                type="text"
+                placeholder="目標 (例: 週2回の新規アプローチ)"
+                value={newPlan}
+                onChange={(e) => setNewPlan(e.target.value)}
+                className="w-full p-2 text-xs border border-slate-300 rounded-xl bg-white"
+              />
+              <button type="submit" className="w-full py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold">
+                チームに追加する
+              </button>
+            </form>
+          )}
+
           <div className="grid grid-cols-3 gap-2">
             <button
-              onClick={() => setCurrentFilter(currentFilter === 'check_pending' ? 'all' : 'check_pending')}
-              className={`p-3 rounded-2xl border text-center transition ${currentFilter === 'check_pending' ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-400' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              onClick={() => setFilter(filter === 'check_pending' ? 'all' : 'check_pending')}
+              className={`p-3 rounded-2xl border text-center transition ${filter === 'check_pending' ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-400' : 'border-slate-200 bg-white'}`}
             >
               <span className="text-[10px] font-bold text-amber-700 block">確認待ち</span>
-              <span className="text-xl font-black text-amber-600">{checkPendingCount}</span>
+              <span className="text-xl font-black text-amber-600">{checkPending}</span>
               <span className="text-[9px] text-amber-700 block">件 (要対応)</span>
             </button>
             <button
-              onClick={() => setCurrentFilter(currentFilter === 'revision_requested' ? 'all' : 'revision_requested')}
-              className={`p-3 rounded-2xl border text-center transition ${currentFilter === 'revision_requested' ? 'border-red-400 bg-red-50 ring-2 ring-red-400' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              onClick={() => setFilter(filter === 'revision_requested' ? 'all' : 'revision_requested')}
+              className={`p-3 rounded-2xl border text-center transition ${filter === 'revision_requested' ? 'border-red-400 bg-red-50 ring-2 ring-red-400' : 'border-slate-200 bg-white'}`}
             >
               <span className="text-[10px] font-bold text-red-700 block">再提出待ち</span>
-              <span className="text-xl font-black text-red-600">{revisionCount}</span>
+              <span className="text-xl font-black text-red-600">{revision}</span>
               <span className="text-[9px] text-red-700 block">件 (メンバー)</span>
             </button>
             <button
-              onClick={() => setCurrentFilter(currentFilter === 'confirmed' ? 'all' : 'confirmed')}
-              className={`p-3 rounded-2xl border text-center transition ${currentFilter === 'confirmed' ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
+              onClick={() => setFilter(filter === 'confirmed' ? 'all' : 'confirmed')}
+              className={`p-3 rounded-2xl border text-center transition ${filter === 'confirmed' ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : 'border-slate-200 bg-white'}`}
             >
               <span className="text-[10px] font-bold text-emerald-700 block">確認完了</span>
-              <span className="text-xl font-black text-emerald-600">{confirmedCount}</span>
+              <span className="text-xl font-black text-emerald-600">{confirmed}</span>
               <span className="text-[9px] text-emerald-700 block">件 (進行中)</span>
             </button>
           </div>
 
-          <div className="flex border-b border-slate-200 text-xs font-bold">
-            <button
-              onClick={() => setActiveTab('stalls')}
-              className={`pb-2 px-3 border-b-2 transition ${activeTab === 'stalls' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-            >
-              滞りサイクル一覧 ({tasks.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('members')}
-              className={`pb-2 px-3 border-b-2 transition ${activeTab === 'members' ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-400 hover:text-slate-600'}`}
-            >
-              所属メンバー一覧 ({members.length})
-            </button>
-          </div>
-
-          {activeTab === 'stalls' && (
-            <div className="space-y-3">
-              {filteredTasks.length === 0 ? (
-                <div className="p-8 text-center rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2">
-                  <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
-                  <p className="text-sm font-bold text-slate-800">サイクルの滞りはありません</p>
-                  <p className="text-xs text-slate-400">配下メンバー全員が順調に自走しています。</p>
-                </div>
-              ) : (
-                filteredTasks.map((task) => (
-                  <div key={task.planId} className="p-3.5 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-2.5">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center">
-                          {task.memberName.slice(0, 1)}
-                        </div>
-                        <span className="text-xs font-bold text-slate-900">{task.memberName}</span>
+          <div className="space-y-3">
+            {filtered.length === 0 ? (
+              <div className="p-8 text-center rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto" />
+                <p className="text-sm font-bold text-slate-800">サイクルの滞りはありません</p>
+                <p className="text-xs text-slate-400">配下メンバー全員が順調に自走しています。</p>
+              </div>
+            ) : (
+              filtered.map((t) => (
+                <div key={t.id} className="p-3.5 rounded-2xl border border-slate-200 bg-white shadow-sm space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 font-bold text-xs flex items-center justify-center">
+                        {t.name.slice(0, 1)}
                       </div>
-                      {task.status === 'check_pending' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Check確認待ち</span>}
-                      {task.status === 'revision_requested' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">修正依頼中</span>}
-                      {task.status === 'confirmed' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">確認完了</span>}
+                      <span className="text-xs font-bold text-slate-900">{t.name}</span>
                     </div>
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{task.planTitle}</p>
-                      <p className="text-[11px] text-slate-500 mt-0.5">
-                        実績: {task.rawTargetData.totalActual} {task.rawTargetData.unit} / 判定: {task.rawTargetData.isAchieved ? '達成 🎉' : '未達成 ⚠️'}
+                    {t.status === 'check_pending' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">Check確認待ち</span>}
+                    {t.status === 'revision_requested' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">修正依頼中</span>}
+                    {t.status === 'confirmed' && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">確認完了</span>}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-slate-800">{t.plan}</p>
+                    <p className="text-[11px] text-slate-500 mt-0.5">実績: {t.actual}</p>
+                    {t.comment && (
+                      <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg mt-1 border border-slate-100">
+                        💬 コメント: {t.comment}
                       </p>
-                      {task.latestReviewComment && (
-                        <p className="text-[11px] text-slate-600 bg-slate-50 p-2 rounded-lg mt-1 border border-slate-100">
-                          💬 管理者コメント: {task.latestReviewComment}
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => setSelectedTask(task.rawTargetData)}
-                      className={`w-full py-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${task.status === 'check_pending' ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
-                    >
-                      <span>提出内容をレビューする ➔</span>
-                    </button>
+                    )}
                   </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {activeTab === 'members' && (
-            <div className="space-y-2.5">
-              {members.map((m) => (
-                <div key={m.id} className="p-3 bg-white border border-slate-200 rounded-2xl flex items-center justify-between shadow-sm">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center">
-                      {m.name.slice(0, 1)}
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-bold text-slate-900">{m.name}</span>
-                        <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${m.role === 'manager' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'}`}>
-                          {m.role === 'manager' ? '管理者' : 'メンバー'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-0.5">{m.planTitle || '参加日: ' + m.joinedAt}</p>
-                    </div>
-                  </div>
-                  {m.role !== 'manager' && (
-                    <button onClick={() => handleDeleteMember(m.id)} className="p-1.5 text-slate-300 hover:text-red-500 transition" title="解除">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
+                  <button
+                    onClick={() => setReviewingTask(t)}
+                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold"
+                  >
+                    提出内容をレビューする ➔
+                  </button>
                 </div>
-              ))}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </>
       )}
 
-      {showCreateTeamModal && (
+      {reviewingTask && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-slate-900">👑 チームの開設</h3>
-              <button onClick={() => setShowCreateTeamModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-            </div>
-            <form onSubmit={handleCreateTeam} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">チーム名 / 部署名</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="例: 営業1課、マーケティング部"
-                  value={teamNameInput}
-                  onChange={(e) => setTeamNameInput(e.target.value)}
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
-                管理者として開設する
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showAddMemberModal && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-slate-900">👤 メンバーの追加</h3>
-              <button onClick={() => setShowAddMemberModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-            </div>
-            <form onSubmit={handleAddMember} className="space-y-3">
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">メンバーのお名前</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="例: 伊藤 健一"
-                  value={memberNameInput}
-                  onChange={(e) => setMemberNameInput(e.target.value)}
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">担当する目標 (Plan)</label>
-                <input
-                  type="text"
-                  placeholder="例: 週2回の商談振り返り実施"
-                  value={memberPlanInput}
-                  onChange={(e) => setMemberPlanInput(e.target.value)}
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <button type="submit" className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm">
-                チームメンバーに追加する
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {showInviteModal && org && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-extrabold text-slate-900">🔗 メンバー招待</h3>
-              <button onClick={() => setShowInviteModal(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
-            </div>
-            <p className="text-xs text-slate-600">以下の招待コードまたはURLをLINEなどで共有すると、メンバーがチームに直接参加できます。</p>
-            <div className="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase">招待コード</span>
-                <span className="text-xs font-mono font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">{org.inviteCode}</span>
-              </div>
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-900">{reviewingTask.name} さんのレビュー</h3>
+            <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
+              {reviewingTask.plan}
+              <br />
+              <span className="text-slate-400 mt-1 block">実績: {reviewingTask.actual}</span>
+            </p>
+            <textarea
+              rows={2}
+              value={reviewComment}
+              onChange={(e) => setReviewComment(e.target.value)}
+              placeholder="フィードバックコメントを入力..."
+              className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none"
+            />
+            <div className="flex gap-2">
               <button
-                onClick={handleCopyInvite}
-                className="w-full py-2 bg-white border border-slate-300 hover:bg-slate-50 text-slate-800 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
+                onClick={() => handleReviewSubmit('confirmed')}
+                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700"
               >
-                {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4 text-slate-500" />}
-                <span>{copied ? '招待URLをコピーしました！' : '招待リンクをコピーする'}</span>
+                ✅ 確認完了 (承認)
+              </button>
+              <button
+                onClick={() => handleReviewSubmit('revision_requested')}
+                className="flex-1 py-2.5 bg-red-50 text-red-700 border border-red-300 rounded-xl text-xs font-bold hover:bg-red-100"
+              >
+                ⚠️ 修正依頼
               </button>
             </div>
+            <button onClick={() => setReviewingTask(null)} className="w-full text-xs text-slate-400 hover:text-slate-600 pt-1">
+              キャンセル
+            </button>
           </div>
         </div>
-      )}
-
-      {selectedTask && (
-        <ReviewModal
-          data={selectedTask}
-          isOpen={true}
-          onClose={() => setSelectedTask(null)}
-          onReviewSubmitted={handleReviewSubmitted}
-        />
       )}
     </div>
   );
