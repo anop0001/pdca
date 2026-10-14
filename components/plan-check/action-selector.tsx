@@ -166,8 +166,8 @@ export function ActionSelector({
       </div>
 
       {showReviseModal && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in">
-          <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 max-h-[88vh] overflow-y-auto shadow-2xl border border-slate-100">
             <div className="flex items-center justify-between border-b pb-3">
               <div>
                 <h3 className="font-bold text-base text-gray-900">
@@ -178,8 +178,10 @@ export function ActionSelector({
                 </p>
               </div>
               <button
+                type="button"
                 onClick={() => setShowReviseModal(false)}
-                className="p-1 rounded-full text-gray-400 hover:text-gray-600"
+                className="p-1.5 rounded-full text-gray-400 hover:text-gray-600 transition"
+                aria-label="閉じる"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -228,14 +230,16 @@ export function ActionSelector({
               />
             </div>
 
-            <button
-              type="button"
-              onClick={handleSaveRevision}
-              disabled={isSubmitting}
-              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-sm shadow-md active:scale-98 transition"
-            >
-              Ver.{currentCriteria.versionNumber + 1} として新規保存する
-            </button>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={handleSaveRevision}
+                disabled={isSubmitting}
+                className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white rounded-xl font-bold text-sm shadow-md transition disabled:opacity-50"
+              >
+                Ver.{currentCriteria.versionNumber + 1} として新規保存する
+              </button>
+            </div>
           </div>
         </div>
       )}
