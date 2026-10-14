@@ -98,22 +98,31 @@ export default function HomePage() {
         return {
           id: p.id,
           title: p.title,
-          status: p.status,
-          objectives: p.objectives,
+          objectiveTitle: p.objectives?.title || '目的未設定',
           currentVersion,
-          todayRecord: todayRecord
-            ? {
-                id: todayRecord.id,
-                actual_value: todayRecord.actual_value,
-                is_completed: todayRecord.is_completed,
-              }
-            : undefined,
+          todayRecord: todayRecord || null,
         };
       });
 
-      setPlans(formattedPlans);
-    } catch (err) {
-      console.warn('Dashboard fetch error:', err);
+      // Supabaseのデータに加えて、ローカルキャッシュに保存されたPlanもマージ
+      let allPlans = [...formattedPlans];
+      if (typeof window !== 'undefined') {
+        const localRaw = localStorage.getItem('pdca_local_plans');
+        if (localRaw) {
+          try {
+            const localList: PlanWithDetails[] = JSON.parse(localRaw);
+            for (const lp of localList) {
+              if (!allPlans.some((p) => p.id === lp.id)) {
+                allPlans.push(lp);
+              }
+            }
+          } catch {}
+        }
+      }
+
+      setPlans(allPlans);
+    } catch (err: any) {
+      console.error('Fetch Dashboard Error:', err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,119 +131,115 @@ export default function HomePage() {
 
   useEffect(() => {
     fetchDashboardData();
+    window.addEventListener('pdca_plans_updated', fetchDashboardData);
+    return () => {
+      window.removeEventListener('pdca_plans_updated', fetchDashboardData);
+    };
   }, [fetchDashboardData]);
 
-  // 実績保存ハンドラ
-  const handleSaveRecord = async (planId: string, actualValue: number) => {
-    const targetPlan = plans.find((p) => p.id === planId);
-    if (!targetPlan || !targetPlan.currentVersion) return;
-
-    const op = targetPlan.currentVersion.operator;
-    const target = targetPlan.currentVersion.target_value;
-
-    let completed = false;
-    if (op === 'gte') completed = actualValue >= target;
-    else if (op === 'lte') completed = actualValue <= target;
-    else if (op === 'eq') completed = actualValue === target;
-
+  const handleSaveRecord = async (
+    planId: string,
+    versionId: string,
+    actualValue: number,
+    isCompleted: boolean
+  ) => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || '00000000-0000-0000-0000-000000000001';
+      let currentUserId = '00000000-0000-0000-0000-000000000001';
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user?.id) currentUserId = user.id;
+      } catch {}
 
-      if (targetPlan.todayRecord?.id) {
+      // Supabaseへの保存を試みる
+      try {
         await supabase
           .from('do_records')
-          .update({
-            actual_value: actualValue,
-            is_completed: completed,
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', targetPlan.todayRecord.id);
-      } else {
-        const { data: newRec } = await supabase
-          .from('do_records')
-          .insert({
-            plan_id: planId,
-            user_id: userId,
-            record_date: todayStr,
-            actual_value: actualValue,
-            is_completed: completed,
-          })
-          .select('id')
-          .single();
+          .upsert(
+            {
+              plan_id: planId,
+              plan_version_id: versionId,
+              user_id: currentUserId,
+              record_date: todayStr,
+              actual_value: actualValue,
+              is_completed: isCompleted,
+              updated_at: new Date().toISOString(),
+            },
+            {
+              onConflict: 'plan_id, record_date',
+            }
+          );
+      } catch (err) {
+        console.warn('Supabase record save warning:', err);
+      }
 
-        if (newRec) {
-          targetPlan.todayRecord = {
-            id: newRec.id,
-            actual_value: actualValue,
-            is_completed: completed,
-          };
+      // ローカルstateを更新
+      setPlans((prev) =>
+        prev.map((item) => {
+          if (item.id === planId) {
+            return {
+              ...item,
+              todayRecord: {
+                id: item.todayRecord?.id || 'rec-' + Date.now(),
+                actual_value: actualValue,
+                is_completed: isCompleted,
+              },
+            };
+          }
+          return item;
+        })
+      );
+
+      // ローカルストレージも更新
+      if (typeof window !== 'undefined') {
+        const localRaw = localStorage.getItem('pdca_local_plans');
+        if (localRaw) {
+          try {
+            const list = JSON.parse(localRaw).map((item: any) => {
+              if (item.id === planId) {
+                return {
+                  ...item,
+                  todayRecord: {
+                    id: item.todayRecord?.id || 'rec-' + Date.now(),
+                    actual_value: actualValue,
+                    is_completed: isCompleted,
+                  },
+                };
+              }
+              return item;
+            });
+            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+          } catch {}
         }
       }
 
-      setPlans((prev) =>
-        prev.map((p) =>
-          p.id === planId
-            ? {
-                ...p,
-                todayRecord: {
-                  id: p.todayRecord?.id || 'temp',
-                  actual_value: actualValue,
-                  is_completed: completed,
-                },
-              }
-            : p
-        )
-      );
-
-      if (completed) {
-        showToast('🎉 目標達成！おめでとうございます！');
-      } else {
-        showToast('実績を記録しました');
-      }
-    } catch (err) {
-      console.warn('Save record error:', err);
-      setPlans((prev) =>
-        prev.map((p) =>
-          p.id === planId
-            ? {
-                ...p,
-                todayRecord: {
-                  id: p.todayRecord?.id || 'temp',
-                  actual_value: actualValue,
-                  is_completed: completed,
-                },
-              }
-            : p
-        )
-      );
-      showToast('実績を記録しました');
+      showToast(isCompleted ? '🎉 達成を記録しました！' : '実績を保存しました');
+    } catch (err: any) {
+      console.error('Save Do Record Error:', err);
+      showToast('実績を保存しました');
     }
   };
 
   // 編集モーダルを開く
   const handleOpenEdit = (plan: PlanWithDetails) => {
     setEditingPlan(plan);
-    setEditTitle(plan.title);
+    setEditTitle(plan.currentVersion?.action_plan || plan.title);
     setEditTargetValue(plan.currentVersion?.target_value ?? 1);
-    setEditUnit(plan.currentVersion?.unit ?? '回');
-    setEditOperator(plan.currentVersion?.operator ?? 'gte');
+    setEditUnit(plan.currentVersion?.unit || '回');
+    setEditOperator(plan.currentVersion?.operator || 'gte');
   };
 
-  // Plan更新
-  const handleUpdatePlan = async (e: React.FormEvent) => {
+  // 編集を保存する
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingPlan) return;
-
-    const newTitle = editTitle.trim();
-    if (!newTitle) return;
-
-    const newTargetVal = Number(editTargetValue);
-    const newUnit = editUnit.trim() || '回';
-    const newOperator = editOperator;
-
     setIsUpdating(true);
     try {
+      const newTitle = editTitle.trim();
+      const newTargetVal = Number(editTargetValue) || 1;
+      const newUnit = editUnit.trim() || '回';
+      const newOperator = editOperator;
+
+      // Supabaseの更新を試行
       await supabase
         .from('plans')
         .update({ title: newTitle, updated_at: new Date().toISOString() })
@@ -252,6 +257,7 @@ export default function HomePage() {
           .eq('id', editingPlan.currentVersion.id);
       }
 
+      // ローカルstateの更新
       setPlans((prev) =>
         prev.map((p) => {
           if (p.id === editingPlan.id) {
@@ -270,6 +276,32 @@ export default function HomePage() {
           return p;
         })
       );
+
+      // ローカルストレージの更新
+      if (typeof window !== 'undefined') {
+        const localRaw = localStorage.getItem('pdca_local_plans');
+        if (localRaw) {
+          try {
+            const list = JSON.parse(localRaw).map((p: any) => {
+              if (p.id === editingPlan.id) {
+                return {
+                  ...p,
+                  title: newTitle,
+                  currentVersion: {
+                    ...p.currentVersion,
+                    action_plan: newTitle,
+                    target_value: newTargetVal,
+                    unit: newUnit,
+                    operator: newOperator,
+                  },
+                };
+              }
+              return p;
+            });
+            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+          } catch {}
+        }
+      }
 
       showToast('✅ Planを更新しました');
       setEditingPlan(null);
@@ -291,14 +323,26 @@ export default function HomePage() {
     }
 
     try {
+      // 関連レコード削除
+      await supabase.from('do_records').delete().eq('plan_id', planId);
+      await supabase.from('plan_versions').delete().eq('plan_id', planId);
       await supabase.from('plans').delete().eq('id', planId);
-      setPlans((prev) => prev.filter((p) => p.id !== planId));
-      showToast('🗑️ Planを削除しました');
     } catch (err) {
       console.warn('Delete warning:', err);
-      setPlans((prev) => prev.filter((p) => p.id !== planId));
-      showToast('🗑️ Planを削除しました');
     }
+
+    if (typeof window !== 'undefined') {
+      const localRaw = localStorage.getItem('pdca_local_plans');
+      if (localRaw) {
+        try {
+          const list = JSON.parse(localRaw).filter((p: any) => p.id !== planId);
+          localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+        } catch {}
+      }
+    }
+
+    setPlans((prev) => prev.filter((p) => p.id !== planId));
+    showToast('🗑️ Planを削除しました');
   };
 
   const completedCount = plans.filter((p) => p.todayRecord?.is_completed).length;
@@ -447,60 +491,73 @@ export default function HomePage() {
               </button>
             </div>
 
-            <form onSubmit={handleUpdatePlan} className="space-y-4">
+            <form onSubmit={handleSaveEdit} className="space-y-3.5">
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Planタイトル / 具体的な行動
+                  実行プラン名 (アクション)
                 </label>
                 <input
                   type="text"
                   required
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
+                  placeholder="例: 毎朝の散歩"
                   className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-                  placeholder="例: 新規架電アプローチ"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">目標値</label>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    目標数値
+                  </label>
                   <input
                     type="number"
                     step="any"
                     required
                     value={editTargetValue}
                     onChange={(e) => setEditTargetValue(Number(e.target.value))}
-                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">単位</label>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                    単位
+                  </label>
                   <input
                     type="text"
                     required
                     value={editUnit}
                     onChange={(e) => setEditUnit(e.target.value)}
-                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-                    placeholder="件, 回, 分など"
+                    placeholder="歩, 回, 分 など"
+                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">達成条件</label>
+                <label className="text-xs font-bold text-slate-700 block mb-1">
+                  達成条件
+                </label>
                 <select
                   value={editOperator}
-                  onChange={(e) => setEditOperator(e.target.value as 'gte' | 'lte' | 'eq')}
+                  onChange={(e) => setEditOperator(e.target.value as any)}
                   className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
                 >
-                  <option value="gte">以上で達成 (≧)</option>
-                  <option value="lte">以下で達成 (≦)</option>
-                  <option value="eq">ぴったりで達成 (＝)</option>
+                  <option value="gte">以上 (目標値以上で達成)</option>
+                  <option value="lte">以下 (目標値以下で達成)</option>
+                  <option value="eq">一致 (目標値と一致で達成)</option>
                 </select>
               </div>
 
               <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPlan(null)}
+                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                >
+                  キャンセル
+                </button>
                 <button
                   type="submit"
                   disabled={isUpdating}
@@ -508,20 +565,12 @@ export default function HomePage() {
                 >
                   {isUpdating ? '保存中...' : '変更を保存'}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setEditingPlan(null)}
-                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-bold transition"
-                >
-                  キャンセル
-                </button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* トースト通知 */}
       {toastMessage && (
         <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-gray-900/90 text-white text-xs font-medium px-4 py-2.5 rounded-full shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
           {toastMessage}
