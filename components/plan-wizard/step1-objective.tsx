@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Target, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { getCurrentUserId } from '@/lib/supabase/auth';
 import type { PlanWizardFormData } from '@/lib/validations/plan';
 
 export function Step1Objective() {
@@ -17,9 +18,17 @@ export function Step1Objective() {
   useEffect(() => {
     async function fetchObjectives() {
       try {
+        const currentUserId = await getCurrentUserId();
+        if (!currentUserId) {
+          setValue('objectiveMode', 'create');
+          setLoading(false);
+          return;
+        }
+
         const { data } = await supabase
           .from('objectives')
           .select('id, title')
+          .eq('user_id', currentUserId)
           .eq('status', 'active')
           .order('created_at', { ascending: false });
 
