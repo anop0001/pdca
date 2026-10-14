@@ -3,31 +3,37 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { supabase } from '@/lib/supabase/client';
 
 export function TopHeader() {
   const pathname = usePathname();
-  const [pendingCount, setPendingCount] = useState<number>(2);
+  const [pendingCount, setPendingCount] = useState<number>(0);
 
   const isTeam = pathname.startsWith('/team');
 
+  // 確認待ち（check_pending）の件数をリアルタイム連動
   useEffect(() => {
-    async function checkPending() {
+    function updateBadge() {
       try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-        const { count, error } = await supabase
-          .from('plans')
-          .select('id', { count: 'exact', head: true })
-          .eq('status', 'check_pending');
-        if (!error && count !== null && count > 0) {
-          setPendingCount(count);
+        const cachedTasks = localStorage.getItem('pdca_team_tasks');
+        if (cachedTasks) {
+          const list = JSON.parse(cachedTasks);
+          const pending = list.filter((t: any) => t.status === 'check_pending').length;
+          setPendingCount(pending);
+          return;
         }
       } catch {
-        // デモ用デフォルト表示(2)を維持
+        // ignore
       }
+      setPendingCount(0);
     }
-    checkPending();
+
+    updateBadge();
+    window.addEventListener('storage', updateBadge);
+    window.addEventListener('pdca_tasks_updated', updateBadge);
+    return () => {
+      window.removeEventListener('storage', updateBadge);
+      window.removeEventListener('pdca_tasks_updated', updateBadge);
+    };
   }, []);
 
   return (
@@ -45,9 +51,9 @@ export function TopHeader() {
           <button
             onClick={() => window.location.reload()}
             className="text-[11px] text-slate-400 hover:text-slate-700 transition"
-            title="リセット / 再読込"
+            title="画面再読込"
           >
-            リセット
+            更新
           </button>
           <span className="text-slate-300 text-xs">|</span>
           <button
@@ -86,7 +92,7 @@ export function TopHeader() {
         >
           <span>👥</span> チーム管理 (管理者)
           {pendingCount > 0 && (
-            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black leading-none">
+            <span className="px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black leading-none animate-in zoom-in duration-150">
               {pendingCount}
             </span>
           )}
