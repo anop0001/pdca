@@ -4,6 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { getCurrentUserId } from '@/lib/supabase/auth';
+import { useLiff } from '@/components/liff-provider';
 import { DoRecordCard, type PlanWithDetails } from '@/components/do-record-card';
 
 function getTodayJSTString(): string {
@@ -16,6 +18,7 @@ function getTodayJSTString(): string {
 }
 
 export default function HomePage() {
+  const { isReady, user: liffUser } = useLiff();
   const [plans, setPlans] = useState<PlanWithDetails[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,74 +47,88 @@ export default function HomePage() {
 
   const fetchDashboardData = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      // ログイン中のユーザーID（UUID）を特定（LIFFプロファイルまたはSupabaseセッション）
+      const currentUserId = await getCurrentUserId(liffUser || undefined);
 
-      const { data: plansData, error: plansError } = await supabase
-        .from('plans')
-        .select(`
-          id,
-          title,
-          status,
-          objectives ( id, title ),
-          plan_versions (
-            id,
-            version_number,
-            action_plan,
-            target_value,
-            unit,
-            operator,
-            frequency,
-            deadline
-          ),
-          do_records (
-            id,
-            record_date,
-            actual_value,
-            is_completed
-          )
-        `)
-        .eq('status', 'in_progress')
-        .order('created_at', { ascending: false });
+      // セキュリティ保護：ユーザーIDが特定できない場合は他人のPlanを絶対に取得・表示しない
+      let formattedPlans: PlanWithDetails[] = [];
 
-      if (plansError) {
-        console.warn('Plans fetch error:', plansError);
+      if (currentUserId) {
+        const { data: plansData, error: plansError } = await supabase
+          .from('plans')
+          .select(`
+            id,
+            user_id,
+            title,
+            status,
+            objectives ( id, title ),
+            plan_versions (
+              id,
+              version_number,
+              action_plan,
+              target_value,
+              unit,
+              operator,
+              frequency,
+              deadline
+            ),
+            do_records (
+              id,
+              record_date,
+              actual_value,
+              is_completed
+            )
+          `)
+          .eq('user_id', currentUserId)
+          .eq('status', 'in_progress')
+          .order('created_at', { ascending: false });
+
+        if (plansError) {
+          console.warn('Plans fetch error:', plansError);
+        }
+
+        if (plansData) {
+          formattedPlans = plansData.map((p: any) => {
+            const sortedVersions = (p.plan_versions || []).sort(
+              (a: any, b: any) => b.version_number - a.version_number
+            );
+            const currentVersion = sortedVersions[0] || {
+              id: '',
+              action_plan: p.title,
+              target_value: 1,
+              unit: '回',
+              operator: 'gte',
+              frequency: 'daily',
+              deadline: '',
+            };
+
+            const todayRecord = (p.do_records || []).find(
+              (r: any) => r.record_date === todayStr
+            );
+
+            return {
+              id: p.id,
+              title: p.title,
+              objectiveTitle: p.objectives?.title || '目的未設定',
+              currentVersion,
+              todayRecord: todayRecord || null,
+            };
+          });
+        }
       }
 
-      const formattedPlans: PlanWithDetails[] = (plansData || []).map((p: any) => {
-        const sortedVersions = (p.plan_versions || []).sort(
-          (a: any, b: any) => b.version_number - a.version_number
-        );
-        const currentVersion = sortedVersions[0] || {
-          id: '',
-          action_plan: p.title,
-          target_value: 1,
-          unit: '回',
-          operator: 'gte',
-          frequency: 'daily',
-          deadline: '',
-        };
-
-        const todayRecord = (p.do_records || []).find(
-          (r: any) => r.record_date === todayStr
-        );
-
-        return {
-          id: p.id,
-          title: p.title,
-          objectiveTitle: p.objectives?.title || '目的未設定',
-          currentVersion,
-          todayRecord: todayRecord || null,
-        };
-      });
-
-      // Supabaseのデータに加えて、ローカルキャッシュに保存されたPlanもマージ
+      // Supabaseのデータに加えて、端末のローカルキャッシュに保存されたPlanもマージ
       let allPlans = [...formattedPlans];
       if (typeof window !== 'undefined') {
         const localRaw = localStorage.getItem('pdca_local_plans');
         if (localRaw) {
           try {
-            const localList: PlanWithDetails[] = JSON.parse(localRaw);
+            const localList: (PlanWithDetails & { userId?: string })[] = JSON.parse(localRaw);
             for (const lp of localList) {
+              // 自身のPlanまたは端末作成Planのみ表示（他人のuserIdが付いているものは除外）
+              if (lp.userId && currentUserId && lp.userId !== currentUserId) {
+                continue;
+              }
               if (!allPlans.some((p) => p.id === lp.id)) {
                 allPlans.push(lp);
               }
@@ -127,15 +144,16 @@ export default function HomePage() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [todayStr]);
+  }, [todayStr, liffUser]);
 
   useEffect(() => {
+    if (!isReady) return;
     fetchDashboardData();
     window.addEventListener('pdca_plans_updated', fetchDashboardData);
     return () => {
       window.removeEventListener('pdca_plans_updated', fetchDashboardData);
     };
-  }, [fetchDashboardData]);
+  }, [isReady, fetchDashboardData]);
 
   const handleSaveRecord = async (
     planId: string,
@@ -144,11 +162,7 @@ export default function HomePage() {
     isCompleted: boolean
   ) => {
     try {
-      let currentUserId = '00000000-0000-0000-0000-000000000001';
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user?.id) currentUserId = user.id;
-      } catch {}
+      const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
 
       // Supabaseへの保存を試みる
       try {
@@ -212,11 +226,16 @@ export default function HomePage() {
         }
       }
 
-      showToast(isCompleted ? '🎉 達成を記録しました！' : '実績を保存しました');
-    } catch (err: any) {
-      console.error('Save Do Record Error:', err);
-      showToast('実績を保存しました');
+      showToast(isCompleted ? '🎉 本日の目標を達成しました！' : '💾 実績を記録しました');
+    } catch (err) {
+      console.warn('Save Record Error:', err);
+      showToast('実績を記録しました');
     }
+  };
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDashboardData();
   };
 
   // 編集モーダルを開く
@@ -349,53 +368,79 @@ export default function HomePage() {
   const totalCount = plans.length;
 
   return (
-    <div className="max-w-md mx-auto space-y-5 pb-8 animate-in fade-in duration-200">
-      <div className="flex items-end justify-between pt-1">
+    <div className="space-y-4 pb-20 animate-in fade-in duration-200">
+      {/* トースト通知 */}
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-gray-900/90 text-white text-xs font-semibold px-4 py-2 rounded-full shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-top-2">
+          {toastMessage}
+        </div>
+      )}
+
+      {/* 今日の日付ヘッダー */}
+      <div className="flex items-center justify-between pt-1">
         <div>
-          <div className="flex items-center gap-1.5 text-xs text-gray-500 font-medium">
-            <Calendar className="w-3.5 h-3.5 text-gray-400" />
+          <div className="flex items-center gap-1.5 text-xs text-gray-500 font-semibold">
+            <Calendar className="w-3.5 h-3.5 text-emerald-600" />
             <span>{todayFormatted}</span>
           </div>
           <h1 className="text-xl font-extrabold text-gray-900 mt-0.5">今日のPDCA</h1>
         </div>
-
         <div className="flex items-center gap-2">
           <Link
             href="/plans/new"
-            className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-bold shadow-sm transition"
+            className="flex items-center gap-1 bg-emerald-600 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm active:bg-emerald-700 transition"
           >
             <Plus className="w-3.5 h-3.5" />
-            Plan作成
+            <span>Plan作成</span>
           </Link>
           <button
-            onClick={() => {
-              setRefreshing(true);
-              fetchDashboardData();
-            }}
-            disabled={refreshing || loading}
-            className="p-1.5 text-gray-400 hover:text-gray-600 rounded-full"
-            aria-label="更新"
+            onClick={handleRefresh}
+            disabled={refreshing}
+            className="p-1.5 text-gray-400 hover:text-gray-600 active:rotate-180 transition-all rounded-lg"
+            title="更新"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-emerald-600' : ''}`} />
           </button>
         </div>
       </div>
 
-      {!loading && totalCount > 0 && (
-        <div className="p-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl text-white shadow-sm flex items-center justify-between">
+      {/* サマリー進捗カード */}
+      <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-4 text-white shadow-md">
+        <div className="flex items-center justify-between">
           <div>
             <p className="text-[11px] font-medium text-emerald-100">本日の進捗状況</p>
-            <p className="text-lg font-bold mt-0.5">
-              {completedCount} / {totalCount} 完了
+            <p className="text-2xl font-black mt-0.5">
+              {completedCount} / {totalCount}{' '}
+              <span className="text-xs font-normal text-emerald-100">完了</span>
             </p>
           </div>
-          <div className="flex items-center gap-1.5 bg-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" />
-            {completedCount === totalCount ? 'パーフェクト達成！' : 'あと少し！'}
+          <div className="text-right">
+            {totalCount > 0 && completedCount === totalCount ? (
+              <span className="inline-flex items-center gap-1 bg-white/20 text-white text-xs font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
+                🎉 オールクリア！
+              </span>
+            ) : totalCount > 0 ? (
+              <span className="inline-flex items-center gap-1 bg-white/10 text-emerald-100 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <Sparkles className="w-3 h-3" />
+                あと少し！
+              </span>
+            ) : (
+              <span className="text-xs text-emerald-100">Planを設定しましょう</span>
+            )}
           </div>
         </div>
-      )}
 
+        {totalCount > 0 && (
+          <div className="mt-3 bg-black/15 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-white h-full rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${(completedCount / totalCount) * 100}%` }}
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Planリスト */}
       {loading ? (
         <div className="space-y-3">
           {[1, 2, 3].map((n) => (
@@ -478,14 +523,14 @@ export default function HomePage() {
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
           <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 shadow-xl">
             <div className="flex items-center justify-between border-b pb-3">
-              <div>
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Plan編集</span>
-                <h3 className="text-sm font-extrabold text-slate-900">目標・判定基準の変更</h3>
+              <div className="flex items-center gap-2 text-gray-900 font-bold text-base">
+                <Pencil className="w-4 h-4 text-emerald-600" />
+                <span>Plan内容の修正</span>
               </div>
               <button
                 type="button"
                 onClick={() => setEditingPlan(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-full"
+                className="p-1 text-gray-400 hover:text-gray-600 rounded-lg"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -493,60 +538,60 @@ export default function HomePage() {
 
             <form onSubmit={handleSaveEdit} className="space-y-3.5">
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  実行プラン名 (アクション)
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  行動内容 (Plan名)
                 </label>
                 <input
                   type="text"
-                  required
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
-                  placeholder="例: 毎朝の散歩"
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+                  required
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  placeholder="例: 毎日のウォーキング"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
                     目標数値
                   </label>
                   <input
                     type="number"
-                    step="any"
-                    required
+                    min="1"
                     value={editTargetValue}
                     onChange={(e) => setEditTargetValue(Number(e.target.value))}
-                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
+                    required
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">
+                  <label className="block text-xs font-semibold text-gray-700 mb-1">
                     単位
                   </label>
                   <input
                     type="text"
-                    required
                     value={editUnit}
                     onChange={(e) => setEditUnit(e.target.value)}
-                    placeholder="歩, 回, 分 など"
-                    className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-center font-bold"
+                    required
+                    className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    placeholder="歩, 分, 回, ページなど"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
                   達成条件
                 </label>
                 <select
                   value={editOperator}
                   onChange={(e) => setEditOperator(e.target.value as any)}
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
+                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:outline-none bg-white"
                 >
-                  <option value="gte">以上 (目標値以上で達成)</option>
-                  <option value="lte">以下 (目標値以下で達成)</option>
-                  <option value="eq">一致 (目標値と一致で達成)</option>
+                  <option value="gte">以上（目標値以上で達成）</option>
+                  <option value="eq">一致（目標値と同じで達成）</option>
+                  <option value="lte">以下（目標値以下で達成）</option>
                 </select>
               </div>
 
@@ -554,26 +599,20 @@ export default function HomePage() {
                 <button
                   type="button"
                   onClick={() => setEditingPlan(null)}
-                  className="flex-1 py-2.5 border border-slate-200 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition"
+                  className="flex-1 py-2 text-xs font-bold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-xl transition"
                 >
                   キャンセル
                 </button>
                 <button
                   type="submit"
-                  disabled={isUpdating}
-                  className="flex-1 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                  disabled={isUpdating || !editTitle.trim()}
+                  className="flex-1 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 rounded-xl transition shadow-sm disabled:opacity-50"
                 >
                   {isUpdating ? '保存中...' : '変更を保存'}
                 </button>
               </div>
             </form>
           </div>
-        </div>
-      )}
-
-      {toastMessage && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-gray-900/90 text-white text-xs font-medium px-4 py-2.5 rounded-full shadow-lg backdrop-blur-sm animate-in fade-in slide-in-from-bottom-2 duration-200">
-          {toastMessage}
         </div>
       )}
     </div>
