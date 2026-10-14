@@ -2,7 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Check, Plus, Minus, Target, Flame, CheckCircle2, Loader2, ArrowRight, Pencil, Trash2 } from 'lucide-react';
+import { Check, Plus, Minus, Target, Flame, CheckCircle2, Loader2, ArrowRight, Pencil, Trash2, Calendar } from 'lucide-react';
+import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export interface PlanWithDetails {
   id: string;
@@ -44,6 +45,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
   const [isCompleted, setIsCompleted] = useState<boolean>(plan.todayRecord?.is_completed ?? false);
   const [isSaving, setIsSaving] = useState(false);
   const [hasChanged, setHasChanged] = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   useEffect(() => {
     setActualValue(plan.todayRecord?.actual_value ?? 0);
@@ -101,7 +103,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
 
   return (
     <div
-      className={`p-4 rounded-2xl border transition-all duration-300 shadow-sm ${
+      className={`p-4 rounded-2xl border transition shadow-sm ${
         isCompleted
           ? 'bg-emerald-50/60 border-emerald-300 ring-1 ring-emerald-200'
           : 'bg-white border-gray-200/80 hover:border-gray-300'
@@ -125,6 +127,15 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
           >
             Check ➔
           </Link>
+          <button
+            type="button"
+            onClick={() => setShowCalendarModal(true)}
+            className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+            title="評価期日をカレンダーに登録"
+            aria-label="カレンダー"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+          </button>
           {onEdit && (
             <button
               type="button"
@@ -178,21 +189,26 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
               本日の実行を完了しました！
             </>
           ) : (
-            <>
-              <span className="w-5 h-5 rounded-md border-2 border-gray-400 inline-block" />
-              タップして本日の完了を記録
-            </>
+            'タップして本日の実行を記録'
           )}
         </button>
       ) : (
         <div className="space-y-3">
-          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
-            <div
-              className={`h-full transition-all duration-300 ${
-                isCompleted ? 'bg-emerald-500' : 'bg-emerald-400'
-              }`}
-              style={{ width: `${progressPercent}%` }}
-            />
+          <div>
+            <div className="flex justify-between items-center text-xs mb-1">
+              <span className="text-gray-500 font-medium">本日の実績</span>
+              <span className="font-bold text-gray-700">
+                {actualValue} / {version.target_value} {version.unit} ({progressPercent}%)
+              </span>
+            </div>
+            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
+              <div
+                className={`h-full transition-all duration-300 rounded-full ${
+                  isCompleted ? 'bg-emerald-500' : 'bg-emerald-400'
+                }`}
+                style={{ width: `${progressPercent}%` }}
+              />
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -247,6 +263,17 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
           </div>
         </div>
       )}
+
+      {/* カレンダーリマインドモーダル */}
+      <CalendarReminderModal
+        isOpen={showCalendarModal}
+        onClose={() => setShowCalendarModal(false)}
+        options={{
+          title: version.action_plan || plan.title,
+          deadlineDate: version.deadline || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+          description: `目標値: ${version.target_value}${version.unit} の振り返り評価期日です。実績を確認して次のActionを決定しましょう！`,
+        }}
+      />
     </div>
   );
 }
