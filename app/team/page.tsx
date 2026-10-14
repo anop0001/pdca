@@ -43,6 +43,11 @@ export default function TeamPage() {
   const [inviteModalTeamName, setInviteModalTeamName] = useState('');
   const [inviteModalMessage, setInviteModalMessage] = useState('');
 
+  // LINEリマインド送信モーダル（完全無料・通数制限なし）
+  const [showReminderModal, setShowReminderModal] = useState(false);
+  const [reminderTargetName, setReminderTargetName] = useState('');
+  const [reminderMessage, setReminderMessage] = useState('');
+
   // アカウント名（LINE表示名、またはローカル保存されているユーザー名）を取得
   const getAccountName = useCallback(() => {
     if (liffUser?.displayName) return liffUser.displayName;
@@ -58,191 +63,141 @@ export default function TeamPage() {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-  const sync = (tList: TeamTask[], tName: string, code?: string) => {
-    setTasks(tList);
-    setTeamName(tName);
-    const finalCode = code || inviteCode;
-    setInviteCode(finalCode);
+  const sync = (newTasks: TeamTask[], newNameVal?: string, newCodeVal?: string) => {
+    setTasks(newTasks);
     if (typeof window !== 'undefined') {
-      localStorage.setItem('pdca_team_info', JSON.stringify({ name: tName, code: finalCode }));
-      localStorage.setItem('pdca_team_tasks', JSON.stringify(tList));
-      window.dispatchEvent(new Event('pdca_tasks_updated'));
+      localStorage.setItem('pdca_team_tasks', JSON.stringify(newTasks));
+      if (newNameVal !== undefined) {
+        setTeamName(newNameVal);
+        localStorage.setItem('pdca_team_name', newNameVal);
+      }
+      if (newCodeVal !== undefined) {
+        setInviteCode(newCodeVal);
+        localStorage.setItem('pdca_team_invite_code', newCodeVal);
+      }
     }
   };
 
-  // LINEユーザー情報が取得できた際、過去のデフォルト(ANOP)の修正や初期設定
-  useEffect(() => {
-    if (liffUser?.displayName) {
-      const autoTeamName = `${liffUser.displayName}チーム`;
-
-      setTeamName((prev) => {
-        // もし未設定、または過去のデフォルト「ANOP」や仮の名前の場合は、アカウント名+チームに更新
-        if (!prev || prev.includes('ANOP') || prev === 'マイPDCAチーム' || prev === 'マイチーム') {
-          if (typeof window !== 'undefined') {
-            const savedInfo = localStorage.getItem('pdca_team_info');
-            const parsed = savedInfo ? JSON.parse(savedInfo) : {};
-            parsed.name = autoTeamName;
-            localStorage.setItem('pdca_team_info', JSON.stringify(parsed));
-          }
-          return autoTeamName;
-        }
-        return prev;
-      });
-
-      // 開設用入力欄のデフォルトもアカウント名+チームに設定
-      setNewTeamInput((prev) => (!prev || prev.includes('ANOP') ? autoTeamName : prev));
-    }
-  }, [liffUser]);
-
-  // デモデータの読み込み
-  const loadDemo = useCallback(() => {
+  const loadDemo = () => {
     const acc = getAccountName();
-    const curName = acc ? `${acc}チーム` : '営業第1チーム';
-    const demo: TeamTask[] = [
+    const defaultName = acc ? `${acc}チーム` : 'マイチーム';
+    const initialTasks: TeamTask[] = [
       { id: '1', name: '田中 健太', plan: '新規架電アプローチ (毎日20件)', status: 'check_pending', actual: '期間合計85件 / 未達 ⚠️' },
-      { id: '2', name: '佐藤 茜', plan: '商談後の即時議事録送付', status: 'revision_requested', actual: '期間内3回 / 未達 ⚠️', comment: '目標値の具体化を依頼中' },
-      { id: '3', name: '山田 太郎', plan: '毎日3件の既存フォロー連絡', status: 'confirmed', actual: '期間合計21件 / 達成 🎉', comment: '素晴らしい継続力です！' },
+      { id: '2', name: '佐藤 茜', plan: '商談後の即時議事録送付', status: 'revision_requested', actual: '期間内3回 / 未達 ⚠️', comment: '目標値の具体化をアドバイス中' },
+      { id: '3', name: '山田 太郎', plan: '毎日3件の既存フォロー連絡', status: 'confirmed', actual: '期間合計21件 / 達成 🎉', comment: '素晴らしい自走継続です！' },
     ];
-    sync(demo, curName, 'DEMO-2026');
-    showToast('⚡ デモ用メンバーデータを読み込みました');
-  }, [inviteCode, getAccountName]);
+    sync(initialTasks, teamName || defaultName, inviteCode || 'TEAM-2026');
+    showToast('チームを初期設定しました');
+  };
 
-  // 初期読み込み: Supabase実データまたはローカルキャッシュから復元
-  useEffect(() => {
-    async function loadTeamData() {
-      const acc = getAccountName();
-      const defaultName = acc ? `${acc}チーム` : 'マイチーム';
+  const loadTeamData = useCallback(async () => {
+    const acc = getAccountName();
+    const defaultFallbackName = acc ? `${acc}チーム` : 'マイチーム';
 
-      // 1. ローカルキャッシュ読込
-      if (typeof window !== 'undefined') {
-        const savedInfo = localStorage.getItem('pdca_team_info');
-        const savedTasks = localStorage.getItem('pdca_team_tasks');
-        if (savedInfo) {
-          try {
-            const parsed = JSON.parse(savedInfo);
-            const savedName = parsed.name || '';
-            // 過去のデフォルト「ANOP」が残っている場合はアカウント名+チームに自動置換
-            if (savedName.includes('ANOP')) {
-              setTeamName(defaultName);
-              parsed.name = defaultName;
-              localStorage.setItem('pdca_team_info', JSON.stringify(parsed));
-            } else {
-              setTeamName(savedName);
-            }
-            if (parsed.code) setInviteCode(parsed.code);
-          } catch {}
-        }
-        if (savedTasks) {
-          try {
-            setTasks(JSON.parse(savedTasks));
-          } catch {}
-        }
-      }
+    let savedName = '';
+    let savedCode = '';
+    let savedTasks: TeamTask[] = [];
 
-      // 2. Supabaseからの実メンバー同期を試行
-      try {
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('id, name, invite_code')
-          .limit(1)
-          .maybeSingle();
-
-        if (orgData) {
-          if (orgData.name && !orgData.name.includes('ANOP')) {
-            setTeamName(orgData.name);
-          } else {
-            // ANOPが含まれる場合はアカウント名+チームに自動置換
-            setTeamName(defaultName);
-            supabase.from('organizations').update({ name: defaultName }).eq('id', orgData.id).then();
-          }
-          if (orgData.invite_code) setInviteCode(orgData.invite_code);
-
-          // メンバー一覧を取得
-          const { data: members } = await supabase
-            .from('memberships')
-            .select('id, user_id, role, member_name, created_at')
-            .eq('organization_id', orgData.id);
-
-          if (members && members.length > 0) {
-            // 各メンバーのPlanと最新実績を取得
-            const realTasks: TeamTask[] = [];
-            for (const m of members) {
-              const { data: plans } = await supabase
-                .from('plans')
-                .select(`
-                  id,
-                  title,
-                  status,
-                  plan_versions (
-                    action_plan,
-                    target_value,
-                    unit
-                  ),
-                  do_records (
-                    actual_value,
-                    is_completed
-                  )
-                `)
-                .eq('user_id', m.user_id)
-                .eq('status', 'in_progress')
-                .limit(1);
-
-              const currentPlan = plans?.[0];
-              const ver = currentPlan?.plan_versions?.[0];
-              const record = currentPlan?.do_records?.[0];
-
-              realTasks.push({
-                id: m.id,
-                userId: m.user_id,
-                name: m.member_name || 'メンバー',
-                plan: ver?.action_plan || currentPlan?.title || '日次業務の目標達成',
-                status: record?.is_completed ? 'confirmed' : 'check_pending',
-                actual: record ? `本日実績: ${record.actual_value || 0}${ver?.unit || ''}` : '初期サイクル進行中',
-              });
-            }
-
-            if (realTasks.length > 0) {
-              sync(realTasks, orgData.name && !orgData.name.includes('ANOP') ? orgData.name : defaultName, orgData.invite_code);
-            }
-          }
-        }
-      } catch (err) {
-        console.warn('Team fetch from Supabase warning:', err);
+    if (typeof window !== 'undefined') {
+      savedName = localStorage.getItem('pdca_team_name') || '';
+      savedCode = localStorage.getItem('pdca_team_invite_code') || '';
+      const raw = localStorage.getItem('pdca_team_tasks');
+      if (raw) {
+        try {
+          savedTasks = JSON.parse(raw);
+        } catch {}
       }
     }
 
-    loadTeamData();
+    try {
+      const { data: orgData } = await supabase
+        .from('organizations')
+        .select('id, name, invite_code')
+        .limit(1)
+        .maybeSingle();
+
+      if (orgData) {
+        savedName = orgData.name || savedName;
+        savedCode = orgData.invite_code || savedCode;
+      }
+    } catch (err) {
+      console.warn('Supabase org fetch warning:', err);
+    }
+
+    try {
+      const { data: membersData } = await supabase
+        .from('memberships')
+        .select(`
+          id,
+          user_id,
+          role,
+          profiles ( id, display_name ),
+          organizations ( id, name, invite_code )
+        `);
+
+      if (membersData && membersData.length > 0) {
+        const { data: plansData } = await supabase
+          .from('plans')
+          .select(`
+            id,
+            user_id,
+            title,
+            status,
+            plan_versions ( id, action_plan, target_value, unit, operator ),
+            do_records ( id, record_date, actual_value, is_completed )
+          `);
+
+        const remoteTasks: TeamTask[] = membersData.map((m: any) => {
+          const userPlans = (plansData || []).filter((p: any) => p.user_id === m.user_id);
+          const currentPlan = userPlans[0];
+          const currentVersion = currentPlan?.plan_versions?.[0];
+          const record = currentPlan?.do_records?.[0];
+
+          return {
+            id: m.id,
+            userId: m.user_id,
+            name: m.profiles?.display_name || 'メンバー',
+            plan: currentVersion?.action_plan || currentPlan?.title || '日次PDCAアクション',
+            status: record?.is_completed ? 'confirmed' : 'check_pending',
+            actual: record ? `${record.actual_value} ${currentVersion?.unit || '回'}` : '未記録',
+          };
+        });
+
+        if (remoteTasks.length > 0) {
+          savedTasks = remoteTasks;
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase members fetch warning:', err);
+    }
+
+    setTeamName(savedName || defaultFallbackName);
+    setInviteCode(savedCode || 'TEAM-2026');
+    setTasks(savedTasks);
   }, [getAccountName]);
 
-  // 招待URL
+  useEffect(() => {
+    loadTeamData();
+  }, [loadTeamData]);
+
   const joinUrl = typeof window !== 'undefined'
     ? `${window.location.origin}/join?code=${inviteCode}`
     : `https://pdca-mauve.vercel.app/join?code=${inviteCode}`;
 
-  // 招待モーダルを開く
   const openInviteModal = () => {
     const acc = getAccountName();
     const curName = teamName || (acc ? `${acc}チーム` : 'マイチーム');
     setInviteModalTeamName(curName);
-    const msg = `【PDCA Check】「${curName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`;
-    setInviteModalMessage(msg);
+    setInviteModalMessage(`【PDCA Check】「${curName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`);
     setShowInviteModal(true);
   };
 
-  // 招待モーダル内でチーム名変更時の連動
-  const handleInviteModalTeamChange = (val: string) => {
-    setInviteModalTeamName(val);
-    const acc = getAccountName();
-    const oldName = inviteModalTeamName || teamName || (acc ? `${acc}チーム` : 'マイチーム');
-    const newName = val || (acc ? `${acc}チーム` : 'マイチーム');
-    if (inviteModalMessage.includes(oldName)) {
-      setInviteModalMessage(inviteModalMessage.replaceAll(oldName, newName));
-    } else {
-      setInviteModalMessage(`【PDCA Check】「${newName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`);
-    }
+  const handleInviteModalTeamChange = (newNameVal: string) => {
+    setInviteModalTeamName(newNameVal);
+    const cleanName = newNameVal.trim() || 'マイチーム';
+    setInviteModalMessage(`【PDCA Check】「${cleanName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`);
   };
 
-  // LINE友だち選択（Share Target Picker）による招待送信
   const handleLineShare = async (messageText?: string) => {
     setIsSharing(true);
     const acc = getAccountName();
@@ -250,7 +205,6 @@ export default function TeamPage() {
     const textToSend = messageText || `【PDCA Check】「${displayTeam}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`;
 
     try {
-      // 1. LIFF shareTargetPicker（LINE友だち選択画面を開いて直接送信）
       if (liff && liff.isLoggedIn() && liff.isApiAvailable('shareTargetPicker')) {
         const res = await liff.shareTargetPicker([
           {
@@ -260,30 +214,29 @@ export default function TeamPage() {
         ]);
 
         if (res) {
-          showToast('🎉 LINE友だちに招待メッセージを送信しました！');
+          showToast('🎉 LINE友だちにメッセージを送信しました！');
           setShowInviteModal(false);
+          setShowReminderModal(false);
           return;
         }
       }
 
-      // 2. ブラウザ等でのフォールバック（LINE共有スキーム）
       const shareText = encodeURIComponent(textToSend);
       window.open(`https://line.me/R/share?text=${shareText}`, '_blank');
       showToast('LINE共有画面を開きました');
       setShowInviteModal(false);
+      setShowReminderModal(false);
     } catch (err: any) {
       console.warn('Share target picker warning:', err);
-      // クリップボードにコピー
       if (navigator.clipboard) {
         await navigator.clipboard.writeText(textToSend);
-        showToast('🔗 招待メッセージをクリップボードにコピーしました！');
+        showToast('🔗 メッセージをクリップボードにコピーしました！');
       }
     } finally {
       setIsSharing(false);
     }
   };
 
-  // 招待モーダルからの送信ハンドラ
   const handleSendInviteFromModal = async () => {
     const trimmedName = inviteModalTeamName.trim();
     if (trimmedName && trimmedName !== teamName) {
@@ -298,7 +251,6 @@ export default function TeamPage() {
     await handleLineShare(inviteModalMessage);
   };
 
-  // 招待モーダル内のメッセージをコピー
   const handleCopyInviteMessage = async () => {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(inviteModalMessage);
@@ -306,7 +258,6 @@ export default function TeamPage() {
     }
   };
 
-  // 招待URLをクリップボードにコピー
   const handleCopyInviteUrl = async () => {
     if (navigator.clipboard) {
       await navigator.clipboard.writeText(joinUrl);
@@ -314,7 +265,38 @@ export default function TeamPage() {
     }
   };
 
-  // チーム情報編集モーダルを開く
+  // リマインド送信モーダルを開く
+  const openReminderModal = (targetMember?: TeamTask) => {
+    const acc = getAccountName();
+    const displayTeam = teamName || (acc ? `${acc}チーム` : 'マイチーム');
+    const appUrl = typeof window !== 'undefined' ? window.location.origin : 'https://pdca-mauve.vercel.app/';
+
+    if (targetMember) {
+      setReminderTargetName(targetMember.name);
+      setReminderMessage(
+        `【PDCAリマインド】${targetMember.name} さん🎯\n「${targetMember.plan}」の振り返り評価の期日です！\n\n今週の実績を記録して、次の一手を登録しましょう！\n\n▼PDCAアプリを開く👇\n${appUrl}`
+      );
+    } else {
+      setReminderTargetName('');
+      setReminderMessage(
+        `【PDCAリマインド】「${displayTeam}」のみなさん🎯\n今週のPDCA振り返り・評価の締め切りが近づいています！\n\n今週の成果を振り返り、次のActionを確定しましょう！\n\n▼PDCAアプリを開いて確認・記録👇\n${appUrl}`
+      );
+    }
+    setShowReminderModal(true);
+  };
+
+  const handleSendReminder = async () => {
+    await handleLineShare(reminderMessage);
+    setShowReminderModal(false);
+  };
+
+  const handleCopyReminderMessage = async () => {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(reminderMessage);
+      showToast('📋 リマインドメッセージをコピーしました！');
+    }
+  };
+
   const openEditTeamModal = () => {
     const acc = getAccountName();
     setEditTeamName(teamName || (acc ? `${acc}チーム` : 'マイチーム'));
@@ -322,7 +304,6 @@ export default function TeamPage() {
     setShowEditTeamModal(true);
   };
 
-  // チーム情報の更新保存
   const handleSaveTeamEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     const acc = getAccountName();
@@ -342,7 +323,6 @@ export default function TeamPage() {
     }
   };
 
-  // 手動でメンバー追加（デモ用）
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
@@ -361,7 +341,6 @@ export default function TeamPage() {
     showToast(`👤 ${newName.trim()} さんを追加しました`);
   };
 
-  // メンバーの削除（除名）
   const handleDeleteTeamTask = async (id: string) => {
     const target = tasks.find((t) => t.id === id);
     const name = target?.name || 'このメンバー';
@@ -382,12 +361,11 @@ export default function TeamPage() {
     showToast(`🗑️ ${name} さんをチームから除名しました`);
   };
 
-  // レビュー送信
+  // レビュー送信（確認のみでOK・アドバイス中心）
   const handleReviewSubmit = async (status: 'confirmed' | 'revision_requested') => {
     if (!reviewingTask) return;
-    const comment = reviewComment.trim() || (status === 'confirmed' ? '確認完了しました！この調子で進めてください。' : '目標・行動の修正をお願いします。');
+    const comment = reviewComment.trim() || (status === 'confirmed' ? '確認しました！承認不要ですので、この調子で自走を続けてください。' : 'ナイスチャレンジ！次のアクションのヒントや気づきを参考に、次のサイクルを進めてみてください。');
 
-    // Supabaseへのレビュー保存試行
     try {
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('reviews').insert({
@@ -406,7 +384,7 @@ export default function TeamPage() {
     sync(updated, teamName);
     setReviewingTask(null);
     setReviewComment('');
-    showToast(status === 'confirmed' ? '✅ レビュー（確認完了）を送信しました' : '⚠️ 修正依頼を送信しました');
+    showToast(status === 'confirmed' ? '✅ 確認を完了しました（承認不要・自走継続）' : '💡 アドバイスを送信しました（指示待ちにせず自走を支援）');
   };
 
   const checkPending = tasks.filter((t) => t.status === 'check_pending').length;
@@ -419,84 +397,78 @@ export default function TeamPage() {
       {!teamName ? (
         <div className="p-5 rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50 space-y-4 shadow-sm">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold">👑</div>
-            <div>
-              <span className="text-[10px] font-bold text-emerald-700 block uppercase">チーム管理機能</span>
-              <h1 className="text-base font-extrabold text-slate-900">管理者登録 & チーム開設</h1>
-            </div>
+            <Users className="w-5 h-5 text-emerald-600" />
+            <h2 className="text-sm font-extrabold text-slate-900">チーム機能を開設する</h2>
           </div>
           <p className="text-xs text-slate-600 leading-relaxed">
-            直属メンバーのPDCAサイクルの滞り（未達・評価遅れ）をリアルタイムに検知し、レビューやアドバイスを行うダッシュボードです。
+            チームを作ると、メンバーの目標や日々の進捗を一目で把握し、自走を促すアドバイスを行えます。
           </p>
-          <div className="space-y-3 pt-1">
+
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const acc = getAccountName();
+              const finalName = newTeamInput.trim() || (acc ? `${acc}チーム` : 'マイチーム');
+              sync([], finalName, 'TEAM-2026');
+              showToast(`チーム「${finalName}」を開設しました！`);
+            }}
+            className="space-y-3 pt-1"
+          >
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">
-                開設するチーム名 {getAccountName() && <span className="text-emerald-600 font-normal">（デフォルト: {getAccountName()}チーム）</span>}
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                チーム名（後からいつでも変更可能）
               </label>
               <input
                 type="text"
-                placeholder={getAccountName() ? `${getAccountName()}チーム` : '例: 〇〇チーム'}
                 value={newTeamInput}
                 onChange={(e) => setNewTeamInput(e.target.value)}
+                placeholder={getAccountName() ? `${getAccountName()}チーム` : '例: 営業第一チーム'}
                 className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
               />
             </div>
             <button
-              onClick={() => {
-                const acc = getAccountName();
-                const finalName = newTeamInput.trim() || (acc ? `${acc}チーム` : 'マイチーム');
-                sync([], finalName, 'TEAM-' + Math.floor(1000 + Math.random() * 9000));
-                showToast(`🎉 チーム「${finalName}」を開設しました`);
-              }}
-              className="w-full py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-98"
+              type="submit"
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
             >
-              ＋ チームを開設して管理者になる
+              この名前でチームを開設する
             </button>
+          </form>
+
+          <div className="pt-2 border-t border-slate-200/60 text-center">
             <button
+              type="button"
               onClick={loadDemo}
-              className="w-full py-2.5 bg-amber-500 text-white rounded-xl text-xs font-bold hover:bg-amber-600 flex items-center justify-center gap-1 shadow-sm transition active:scale-98"
+              className="text-xs text-emerald-700 hover:text-emerald-900 font-bold inline-flex items-center gap-1"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>⚡ デモ用メンバー（田中・佐藤・山田）を読み込む</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+              <span>デモデータでチーム機能を試す</span>
             </button>
           </div>
         </div>
       ) : (
         <>
-          {/* ヘッダー情報 */}
-          <div className="flex items-center justify-between pt-1">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs text-slate-500 font-semibold">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-bold text-slate-900">{teamName}</span>
-                <button
-                  type="button"
-                  onClick={openEditTeamModal}
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition"
-                  title="チーム名を変更"
-                >
-                  <Pencil className="w-3 h-3 text-emerald-600" />
-                  <span>変更</span>
-                </button>
-                <span>（{tasks.length}名）</span>
-              </div>
-              <h1 className="text-xl font-extrabold text-slate-900 mt-0.5">サイクルの滞り検知</h1>
-            </div>
-            <span className="text-[10px] px-2 py-1 bg-emerald-100 text-emerald-800 rounded-lg font-bold">
-              管理者モード
-            </span>
-          </div>
-
-          {/* メンバー招待 & 追加バー */}
-          <div className="p-3.5 rounded-2xl border border-emerald-200 bg-emerald-50/70 space-y-2.5 shadow-sm">
+          {/* チーム上部情報カード */}
+          <div className="p-4 rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50/70 via-white to-slate-50 space-y-3 shadow-xs">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-emerald-950 flex items-center gap-1">
-                <Users className="w-4 h-4 text-emerald-600" />
-                メンバーの追加・招待
-              </span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-white border border-emerald-300 text-emerald-700 rounded-full">
-                  コード: {inviteCode}
+              <div>
+                <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wide block">チーム管理</span>
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <h1 className="text-lg font-black text-slate-900">{teamName}</h1>
+                  <button
+                    type="button"
+                    onClick={openEditTeamModal}
+                    className="p-1 text-slate-400 hover:text-emerald-600 rounded-md transition"
+                    title="チーム名を変更"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-xl shadow-2xs">
+                <span className="text-[10px] text-slate-400 font-bold">CODE:</span>
+                <span className="font-mono font-bold text-xs text-emerald-700 tracking-wider">
+                  {inviteCode}
                 </span>
                 <button
                   type="button"
@@ -528,6 +500,18 @@ export default function TeamPage() {
                 <span>招待リンクをコピー</span>
               </button>
             </div>
+
+            {/* チーム全体へのLINEリマインド送信ボタン（完全無料） */}
+            <button
+              type="button"
+              onClick={() => openReminderModal()}
+              disabled={isSharing}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
+            >
+              <Share2 className="w-4 h-4 text-emerald-100" />
+              <span>📢 チームにLINEで締め切りリマインドを送信</span>
+              <span className="text-[10px] bg-white/20 text-white px-1.5 py-0.2 rounded-full font-semibold">無料</span>
+            </button>
           </div>
 
           {/* フィルタータブ */}
@@ -540,17 +524,17 @@ export default function TeamPage() {
             >
               <span className="text-[10px] font-bold text-amber-700 block">確認待ち</span>
               <span className="text-xl font-black text-amber-600">{checkPending}</span>
-              <span className="text-[9px] text-amber-700 block">件 (要対応)</span>
+              <span className="text-[9px] text-amber-700 block">件 (要確認)</span>
             </button>
             <button
               onClick={() => setFilter(filter === 'revision_requested' ? 'all' : 'revision_requested')}
               className={`p-3 rounded-2xl border text-center transition ${
-                filter === 'revision_requested' ? 'border-red-400 bg-red-50 ring-2 ring-red-400' : 'border-slate-200 bg-white'
+                filter === 'revision_requested' ? 'border-amber-400 bg-amber-50 ring-2 ring-amber-400' : 'border-slate-200 bg-white'
               }`}
             >
-              <span className="text-[10px] font-bold text-red-700 block">再提出待ち</span>
-              <span className="text-xl font-black text-red-600">{revision}</span>
-              <span className="text-[9px] text-red-700 block">件 (メンバー)</span>
+              <span className="text-[10px] font-bold text-amber-800 block">アドバイス</span>
+              <span className="text-xl font-black text-amber-700">{revision}</span>
+              <span className="text-[9px] text-amber-800 block">件 (ヒント共有)</span>
             </button>
             <button
               onClick={() => setFilter(filter === 'confirmed' ? 'all' : 'confirmed')}
@@ -558,9 +542,9 @@ export default function TeamPage() {
                 filter === 'confirmed' ? 'border-emerald-400 bg-emerald-50 ring-2 ring-emerald-400' : 'border-slate-200 bg-white'
               }`}
             >
-              <span className="text-[10px] font-bold text-emerald-700 block">確認完了</span>
+              <span className="text-[10px] font-bold text-emerald-700 block">確認済み</span>
               <span className="text-xl font-black text-emerald-600">{confirmed}</span>
-              <span className="text-[9px] text-emerald-700 block">件 (順調自走)</span>
+              <span className="text-[9px] text-emerald-700 block">件 (承認不要・自走)</span>
             </button>
           </div>
 
@@ -604,13 +588,13 @@ export default function TeamPage() {
                         </span>
                       )}
                       {t.status === 'revision_requested' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-800">
-                          修正依頼中
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">
+                          💡 アドバイスあり
                         </span>
                       )}
                       {t.status === 'confirmed' && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-                          確認完了
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                          ✅ 確認済み
                         </span>
                       )}
                       <button
@@ -636,12 +620,24 @@ export default function TeamPage() {
                     )}
                   </div>
 
-                  <button
-                    onClick={() => setReviewingTask(t)}
-                    className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
-                  >
-                    提出内容をレビューする ➔
-                  </button>
+                  <div className="flex gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => openReminderModal(t)}
+                      className="py-2 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 active:scale-95 shrink-0"
+                      title="このメンバーにLINEでリマインド送信"
+                    >
+                      <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>LINEリマインド</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReviewingTask(t)}
+                      className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-sm active:scale-95"
+                    >
+                      提出内容をレビューする ➔
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -653,6 +649,7 @@ export default function TeamPage() {
               type="button"
               onClick={() => {
                 if (!confirm('チームを解散（全メンバーとチーム設定をリセット）しますか？\n※初期状態に戻ります。')) return;
+                const acc = getAccountName();
                 sync([], '', 'TEAM-2026');
                 showToast('チームをリセットしました');
               }}
@@ -722,45 +719,88 @@ export default function TeamPage() {
                   rows={4}
                   value={inviteModalMessage}
                   onChange={(e) => setInviteModalMessage(e.target.value)}
-                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-[#06C755] font-sans"
-                  placeholder="メッセージを入力..."
+                  className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-[#06C755] bg-slate-50 leading-relaxed font-sans"
                 />
               </div>
 
-              {/* LINE風プレビュー */}
-              <div className="bg-slate-100 p-3 rounded-2xl space-y-1">
-                <span className="text-[10px] font-bold text-slate-500 block">LINEメッセージ表示プレビュー:</span>
-                <div className="bg-[#85E249]/20 border border-[#85E249]/40 p-2.5 rounded-2xl rounded-tl-sm text-[11px] text-slate-800 whitespace-pre-wrap leading-relaxed font-sans">
-                  {inviteModalMessage}
-                </div>
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSendInviteFromModal}
+                  disabled={isSharing}
+                  className="w-full py-3 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition active:scale-98 disabled:opacity-50"
+                >
+                  <Share2 className="w-4 h-4" />
+                  <span>LINEで友だち・グループを選択して送信</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleCopyInviteMessage}
+                  className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition"
+                >
+                  <Copy className="w-3.5 h-3.5 text-slate-500" />
+                  <span>メッセージをコピー</span>
+                </button>
               </div>
-            </div>
 
-            <div className="space-y-2 pt-1">
-              <button
-                type="button"
-                onClick={handleSendInviteFromModal}
-                disabled={isSharing}
-                className="w-full py-3 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition active:scale-98"
-              >
-                <Share2 className="w-4 h-4" />
-                <span>{isSharing ? '送信準備中...' : 'LINEの友だちを選択して送信'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCopyInviteMessage}
-                className="w-full py-2 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-98"
-              >
-                <Copy className="w-3.5 h-3.5 text-slate-500" />
-                <span>このメッセージをコピー</span>
-              </button>
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1 text-slate-600">
+                <span className="text-[10px] font-bold text-slate-500 block">LINEメッセージ表示プレビュー:</span>
+                <p className="text-[11px] whitespace-pre-wrap font-sans text-slate-800 leading-relaxed bg-white p-2 rounded-lg border border-slate-100">
+                  {inviteModalMessage}
+                </p>
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* チーム名編集モーダル */}
+      {/* 手動メンバー追加モーダル（デモ/テスト用） */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <form onSubmit={handleAddMember} className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-xl">
+            <h3 className="text-sm font-bold text-slate-900">メンバーの手動追加</h3>
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">氏名</label>
+              <input
+                type="text"
+                required
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="例: 田中 健太"
+                className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">現在の取り組み目標 (Plan)</label>
+              <input
+                type="text"
+                value={newPlan}
+                onChange={(e) => setNewPlan(e.target.value)}
+                placeholder="例: 新規架電アプローチ (毎日20件)"
+                className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition"
+              >
+                追加する
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="px-4 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition"
+              >
+                キャンセル
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* チーム情報編集モーダル */}
       {showEditTeamModal && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
           <form onSubmit={handleSaveTeamEdit} className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-xl">
@@ -822,41 +862,132 @@ export default function TeamPage() {
 
       {/* レビューモーダル */}
       {reviewingTask && (
-        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-xl">
-            <h3 className="text-sm font-bold text-slate-900">{reviewingTask.name} さんのレビュー</h3>
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">{reviewingTask.name} さんのレビュー</h3>
+                <p className="text-[10px] text-slate-400">管理者の承認待ちを作らず、自走を促すフィードバック</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setReviewingTask(null)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
             <p className="text-xs text-slate-600 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
               {reviewingTask.plan}
               <br />
               <span className="text-slate-400 mt-1 block">実績: {reviewingTask.actual}</span>
             </p>
-            <textarea
-              rows={2}
-              value={reviewComment}
-              onChange={(e) => setReviewComment(e.target.value)}
-              placeholder="フィードバックコメントを入力..."
-              className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-            <div className="flex gap-2">
+
+            <div>
+              <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                フィードバック・アドバイス（任意）
+              </label>
+              <textarea
+                rows={2}
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                placeholder="自走を促すアドバイスや応援コメントを入力..."
+                className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div className="flex gap-2 pt-1">
               <button
+                type="button"
                 onClick={() => handleReviewSubmit('confirmed')}
-                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition"
+                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition flex flex-col items-center justify-center gap-0.5 shadow-sm"
               >
-                ✅ 確認完了 (承認)
+                <span>✅ 確認のみ</span>
+                <span className="text-[9px] font-normal opacity-85">承認不要・自走継続</span>
               </button>
               <button
+                type="button"
                 onClick={() => handleReviewSubmit('revision_requested')}
-                className="flex-1 py-2.5 bg-red-50 text-red-700 border border-red-300 rounded-xl text-xs font-bold hover:bg-red-100 transition"
+                className="flex-1 py-2.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 active:scale-95 transition flex flex-col items-center justify-center gap-0.5 shadow-xs"
               >
-                ⚠️ 修正依頼
+                <span>💡 アドバイス</span>
+                <span className="text-[9px] font-normal opacity-85">指示待ちにせずヒント共有</span>
               </button>
             </div>
+
             <button
+              type="button"
               onClick={() => setReviewingTask(null)}
-              className="w-full text-xs text-slate-400 hover:text-slate-600 pt-1"
+              className="w-full text-xs text-slate-400 hover:text-slate-600 pt-0.5"
             >
-              キャンセル
+              閉じる
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* LINEリマインド送信モーダル（完全無料・通数制限なし） */}
+      {showReminderModal && (
+        <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-3.5 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Share2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900">
+                    {reminderTargetName ? `${reminderTargetName} さんへのリマインド` : 'チームへの締め切りリマインド'}
+                  </h3>
+                  <p className="text-[10px] text-slate-500">LINE友だち・グループに無料送信</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReminderModal(false)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                送信メッセージ内容（直接編集可能）
+              </label>
+              <textarea
+                rows={5}
+                value={reminderMessage}
+                onChange={(e) => setReminderMessage(e.target.value)}
+                className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 leading-relaxed font-sans bg-slate-50"
+              />
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                type="button"
+                onClick={handleSendReminder}
+                disabled={isSharing}
+                className="w-full py-3 bg-[#06C755] hover:bg-[#05b34c] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm active:scale-98 transition disabled:opacity-50"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>LINEで友だち・グループを選択して送信</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCopyReminderMessage}
+                className="w-full py-2 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-98"
+              >
+                <Copy className="w-3.5 h-3.5 text-slate-500" />
+                <span>メッセージをコピー</span>
+              </button>
+            </div>
+
+            <p className="text-[10px] text-slate-400 text-center">
+              ※LINE公式メッセージ通数を消費せず、何通でも完全無料でリマインドできます。
+            </p>
           </div>
         </div>
       )}
