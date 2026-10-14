@@ -43,6 +43,16 @@ export default function TeamPage() {
   const [inviteModalTeamName, setInviteModalTeamName] = useState('');
   const [inviteModalMessage, setInviteModalMessage] = useState('');
 
+  // アカウント名（LINE表示名、またはローカル保存されているユーザー名）を取得
+  const getAccountName = useCallback(() => {
+    if (liffUser?.displayName) return liffUser.displayName;
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('pdca_user_name');
+      if (saved) return saved;
+    }
+    return '';
+  }, [liffUser]);
+
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
@@ -60,20 +70,49 @@ export default function TeamPage() {
     }
   };
 
+  // LINEユーザー情報が取得できた際、過去のデフォルト(ANOP)の修正や初期設定
+  useEffect(() => {
+    if (liffUser?.displayName) {
+      const autoTeamName = `${liffUser.displayName}チーム`;
+
+      setTeamName((prev) => {
+        // もし未設定、または過去のデフォルト「ANOP」や仮の名前の場合は、アカウント名+チームに更新
+        if (!prev || prev.includes('ANOP') || prev === 'マイPDCAチーム' || prev === 'マイチーム') {
+          if (typeof window !== 'undefined') {
+            const savedInfo = localStorage.getItem('pdca_team_info');
+            const parsed = savedInfo ? JSON.parse(savedInfo) : {};
+            parsed.name = autoTeamName;
+            localStorage.setItem('pdca_team_info', JSON.stringify(parsed));
+          }
+          return autoTeamName;
+        }
+        return prev;
+      });
+
+      // 開設用入力欄のデフォルトもアカウント名+チームに設定
+      setNewTeamInput((prev) => (!prev || prev.includes('ANOP') ? autoTeamName : prev));
+    }
+  }, [liffUser]);
+
   // デモデータの読み込み
   const loadDemo = useCallback(() => {
+    const acc = getAccountName();
+    const curName = acc ? `${acc}チーム` : '営業第1チーム';
     const demo: TeamTask[] = [
       { id: '1', name: '田中 健太', plan: '新規架電アプローチ (毎日20件)', status: 'check_pending', actual: '期間合計85件 / 未達 ⚠️' },
       { id: '2', name: '佐藤 茜', plan: '商談後の即時議事録送付', status: 'revision_requested', actual: '期間内3回 / 未達 ⚠️', comment: '目標値の具体化を依頼中' },
       { id: '3', name: '山田 太郎', plan: '毎日3件の既存フォロー連絡', status: 'confirmed', actual: '期間合計21件 / 達成 🎉', comment: '素晴らしい継続力です！' },
     ];
-    sync(demo, '営業第1チーム', 'DEMO-2026');
+    sync(demo, curName, 'DEMO-2026');
     showToast('⚡ デモ用メンバーデータを読み込みました');
-  }, [inviteCode]);
+  }, [inviteCode, getAccountName]);
 
   // 初期読み込み: Supabase実データまたはローカルキャッシュから復元
   useEffect(() => {
     async function loadTeamData() {
+      const acc = getAccountName();
+      const defaultName = acc ? `${acc}チーム` : 'マイチーム';
+
       // 1. ローカルキャッシュ読込
       if (typeof window !== 'undefined') {
         const savedInfo = localStorage.getItem('pdca_team_info');
@@ -81,7 +120,15 @@ export default function TeamPage() {
         if (savedInfo) {
           try {
             const parsed = JSON.parse(savedInfo);
-            setTeamName(parsed.name || '');
+            const savedName = parsed.name || '';
+            // 過去のデフォルト「ANOP」が残っている場合はアカウント名+チームに自動置換
+            if (savedName.includes('ANOP')) {
+              setTeamName(defaultName);
+              parsed.name = defaultName;
+              localStorage.setItem('pdca_team_info', JSON.stringify(parsed));
+            } else {
+              setTeamName(savedName);
+            }
             if (parsed.code) setInviteCode(parsed.code);
           } catch {}
         }
@@ -101,7 +148,13 @@ export default function TeamPage() {
           .maybeSingle();
 
         if (orgData) {
-          if (orgData.name) setTeamName(orgData.name);
+          if (orgData.name && !orgData.name.includes('ANOP')) {
+            setTeamName(orgData.name);
+          } else {
+            // ANOPが含まれる場合はアカウント名+チームに自動置換
+            setTeamName(defaultName);
+            supabase.from('organizations').update({ name: defaultName }).eq('id', orgData.id).then();
+          }
           if (orgData.invite_code) setInviteCode(orgData.invite_code);
 
           // メンバー一覧を取得
@@ -149,7 +202,7 @@ export default function TeamPage() {
             }
 
             if (realTasks.length > 0) {
-              sync(realTasks, orgData.name || 'マイPDCAチーム', orgData.invite_code);
+              sync(realTasks, orgData.name && !orgData.name.includes('ANOP') ? orgData.name : defaultName, orgData.invite_code);
             }
           }
         }
@@ -159,7 +212,7 @@ export default function TeamPage() {
     }
 
     loadTeamData();
-  }, []);
+  }, [getAccountName]);
 
   // 招待URL
   const joinUrl = typeof window !== 'undefined'
@@ -168,7 +221,8 @@ export default function TeamPage() {
 
   // 招待モーダルを開く
   const openInviteModal = () => {
-    const curName = teamName || 'マイPDCAチーム';
+    const acc = getAccountName();
+    const curName = teamName || (acc ? `${acc}チーム` : 'マイチーム');
     setInviteModalTeamName(curName);
     const msg = `【PDCA Check】「${curName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`;
     setInviteModalMessage(msg);
@@ -178,8 +232,9 @@ export default function TeamPage() {
   // 招待モーダル内でチーム名変更時の連動
   const handleInviteModalTeamChange = (val: string) => {
     setInviteModalTeamName(val);
-    const oldName = inviteModalTeamName || teamName || 'マイPDCAチーム';
-    const newName = val || 'マイPDCAチーム';
+    const acc = getAccountName();
+    const oldName = inviteModalTeamName || teamName || (acc ? `${acc}チーム` : 'マイチーム');
+    const newName = val || (acc ? `${acc}チーム` : 'マイチーム');
     if (inviteModalMessage.includes(oldName)) {
       setInviteModalMessage(inviteModalMessage.replaceAll(oldName, newName));
     } else {
@@ -190,7 +245,9 @@ export default function TeamPage() {
   // LINE友だち選択（Share Target Picker）による招待送信
   const handleLineShare = async (messageText?: string) => {
     setIsSharing(true);
-    const textToSend = messageText || `【PDCA Check】「${teamName || 'マイPDCAチーム'}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`;
+    const acc = getAccountName();
+    const displayTeam = teamName || (acc ? `${acc}チーム` : 'マイチーム');
+    const textToSend = messageText || `【PDCA Check】「${displayTeam}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`;
 
     try {
       // 1. LIFF shareTargetPicker（LINE友だち選択画面を開いて直接送信）
@@ -259,7 +316,8 @@ export default function TeamPage() {
 
   // チーム情報編集モーダルを開く
   const openEditTeamModal = () => {
-    setEditTeamName(teamName);
+    const acc = getAccountName();
+    setEditTeamName(teamName || (acc ? `${acc}チーム` : 'マイチーム'));
     setEditInviteCode(inviteCode);
     setShowEditTeamModal(true);
   };
@@ -267,7 +325,8 @@ export default function TeamPage() {
   // チーム情報の更新保存
   const handleSaveTeamEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const finalName = editTeamName.trim() || 'マイPDCAチーム';
+    const acc = getAccountName();
+    const finalName = editTeamName.trim() || (acc ? `${acc}チーム` : 'マイチーム');
     const finalCode = editInviteCode.trim() || inviteCode;
     sync(tasks, finalName, finalCode);
     setShowEditTeamModal(false);
@@ -287,6 +346,7 @@ export default function TeamPage() {
   const handleAddMember = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim()) return;
+    const acc = getAccountName();
     const newTask: TeamTask = {
       id: String(Date.now()),
       name: newName.trim(),
@@ -294,7 +354,7 @@ export default function TeamPage() {
       status: 'check_pending',
       actual: '初期サイクル進行中',
     };
-    sync([newTask, ...tasks], teamName || 'マイPDCAチーム');
+    sync([newTask, ...tasks], teamName || (acc ? `${acc}チーム` : 'マイチーム'));
     setNewName('');
     setNewPlan('');
     setShowAddModal(false);
@@ -370,10 +430,12 @@ export default function TeamPage() {
           </p>
           <div className="space-y-3 pt-1">
             <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1">開設するチーム名</label>
+              <label className="text-xs font-bold text-slate-700 block mb-1">
+                開設するチーム名 {getAccountName() && <span className="text-emerald-600 font-normal">（デフォルト: {getAccountName()}チーム）</span>}
+              </label>
               <input
                 type="text"
-                placeholder="例: 営業第一チーム、マイプロジェクト"
+                placeholder={getAccountName() ? `${getAccountName()}チーム` : '例: 〇〇チーム'}
                 value={newTeamInput}
                 onChange={(e) => setNewTeamInput(e.target.value)}
                 className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white"
@@ -381,7 +443,8 @@ export default function TeamPage() {
             </div>
             <button
               onClick={() => {
-                const finalName = newTeamInput.trim() || 'マイPDCAチーム';
+                const acc = getAccountName();
+                const finalName = newTeamInput.trim() || (acc ? `${acc}チーム` : 'マイチーム');
                 sync([], finalName, 'TEAM-' + Math.floor(1000 + Math.random() * 9000));
                 showToast(`🎉 チーム「${finalName}」を開設しました`);
               }}
@@ -646,7 +709,8 @@ export default function TeamPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const curName = inviteModalTeamName || teamName || 'マイPDCAチーム';
+                      const acc = getAccountName();
+                      const curName = inviteModalTeamName || teamName || (acc ? `${acc}チーム` : 'マイチーム');
                       setInviteModalMessage(`【PDCA Check】「${curName}」に参加して、一緒に目標管理を始めましょう！\n\n参加はこちらから👇\n${joinUrl}`);
                     }}
                     className="text-[10px] text-emerald-600 hover:underline"
@@ -719,7 +783,7 @@ export default function TeamPage() {
                   required
                   value={editTeamName}
                   onChange={(e) => setEditTeamName(e.target.value)}
-                  placeholder="例: 営業第一チーム"
+                  placeholder={getAccountName() ? `${getAccountName()}チーム` : '例: 営業第一チーム'}
                   className="w-full p-2.5 text-xs border border-slate-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
