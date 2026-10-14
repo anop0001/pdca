@@ -361,10 +361,10 @@ export default function TeamPage() {
     showToast(`🗑️ ${name} さんをチームから除名しました`);
   };
 
-  // レビュー送信（確認のみでOK・アドバイス中心）
+  // レビュー送信（確認のみ・アドバイス）
   const handleReviewSubmit = async (status: 'confirmed' | 'revision_requested') => {
     if (!reviewingTask) return;
-    const comment = reviewComment.trim() || (status === 'confirmed' ? '確認しました！承認不要ですので、この調子で自走を続けてください。' : 'ナイスチャレンジ！次のアクションのヒントや気づきを参考に、次のサイクルを進めてみてください。');
+    const comment = reviewComment.trim() || (status === 'confirmed' ? '確認しました！この調子で自走を続けてください。' : 'ナイスチャレンジ！次のアクションのヒントや気づきを参考に、次のサイクルを進めてみてください。');
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -384,7 +384,7 @@ export default function TeamPage() {
     sync(updated, teamName);
     setReviewingTask(null);
     setReviewComment('');
-    showToast(status === 'confirmed' ? '✅ 確認を完了しました（承認不要・自走継続）' : '💡 アドバイスを送信しました（指示待ちにせず自走を支援）');
+    showToast(status === 'confirmed' ? '✅ 確認を送信しました' : '💡 アドバイスを送信しました');
   };
 
   const checkPending = tasks.filter((t) => t.status === 'check_pending').length;
@@ -544,7 +544,7 @@ export default function TeamPage() {
             >
               <span className="text-[10px] font-bold text-emerald-700 block">確認済み</span>
               <span className="text-xl font-black text-emerald-600">{confirmed}</span>
-              <span className="text-[9px] text-emerald-700 block">件 (承認不要・自走)</span>
+              <span className="text-[9px] text-emerald-700 block">件 (順調自走)</span>
             </button>
           </div>
 
@@ -867,7 +867,7 @@ export default function TeamPage() {
             <div className="flex items-center justify-between border-b border-slate-100 pb-2">
               <div>
                 <h3 className="text-sm font-extrabold text-slate-900">{reviewingTask.name} さんのレビュー</h3>
-                <p className="text-[10px] text-slate-400">管理者の承認待ちを作らず、自走を促すフィードバック</p>
+                <p className="text-[10px] text-slate-400">自走を促すフィードバック</p>
               </div>
               <button
                 type="button"
@@ -901,18 +901,16 @@ export default function TeamPage() {
               <button
                 type="button"
                 onClick={() => handleReviewSubmit('confirmed')}
-                className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition flex flex-col items-center justify-center gap-0.5 shadow-sm"
+                className="flex-1 py-3 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 active:scale-95 transition shadow-sm text-center"
               >
-                <span>✅ 確認のみ</span>
-                <span className="text-[9px] font-normal opacity-85">承認不要・自走継続</span>
+                ✅ 確認のみ
               </button>
               <button
                 type="button"
                 onClick={() => handleReviewSubmit('revision_requested')}
-                className="flex-1 py-2.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 active:scale-95 transition flex flex-col items-center justify-center gap-0.5 shadow-xs"
+                className="flex-1 py-3 bg-amber-50 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold hover:bg-amber-100 active:scale-95 transition shadow-xs text-center"
               >
-                <span>💡 アドバイス</span>
-                <span className="text-[9px] font-normal opacity-85">指示待ちにせずヒント共有</span>
+                💡 アドバイス
               </button>
             </div>
 
