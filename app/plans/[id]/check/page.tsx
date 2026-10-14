@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { ArrowLeft, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { getCurrentUserId } from '@/lib/supabase/auth';
 import { CheckSummaryCard } from '@/components/plan-check/check-summary-card';
 import { ActionSelector, type ActionType } from '@/components/plan-check/action-selector';
 
@@ -186,8 +187,8 @@ export default function PlanCheckPage() {
     setErrorMessage(null);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || '00000000-0000-0000-0000-000000000001';
+      const authId = await getCurrentUserId();
+      const userId = authId || '00000000-0000-0000-0000-000000000001';
 
       const { data: checkRecord } = await supabase
         .from('checks')
