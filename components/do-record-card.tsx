@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Check, Plus, Minus, Target, Flame, CheckCircle2, Loader2, ArrowRight } from 'lucide-react';
+import { Check, Plus, Minus, Target, Flame, CheckCircle2, Loader2, ArrowRight, Pencil, Trash2 } from 'lucide-react';
 
 export interface PlanWithDetails {
   id: string;
@@ -32,9 +32,11 @@ interface DoRecordCardProps {
     actualValue: number,
     isCompleted: boolean
   ) => Promise<void>;
+  onEdit?: (plan: PlanWithDetails) => void;
+  onDelete?: (planId: string) => void;
 }
 
-export function DoRecordCard({ plan, onSaveRecord }: DoRecordCardProps) {
+export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordCardProps) {
   const version = plan.currentVersion;
   const isBinaryType = version.unit === '回' && version.target_value === 1;
 
@@ -119,10 +121,32 @@ export function DoRecordCard({ plan, onSaveRecord }: DoRecordCardProps) {
           )}
           <Link
             href={`/plans/${plan.id}/check`}
-            className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-0.5"
+            className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-0.5 transition"
           >
             Check ➔
           </Link>
+          {onEdit && (
+            <button
+              type="button"
+              onClick={() => onEdit(plan)}
+              className="p-1 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition"
+              title="Planを編集"
+              aria-label="編集"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              onClick={() => onDelete(plan.id)}
+              className="p-1 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition"
+              title="Planを削除"
+              aria-label="削除"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
