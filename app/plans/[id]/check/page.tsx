@@ -302,7 +302,7 @@ export default function PlanCheckPage() {
           operator: currentVersion.operator,
           frequency: currentVersion.frequency,
           deadline: currentVersion.deadline,
-          versionNumber: currentVersion.versionNumber,
+          versionNumber: currentVersion.version_number,
         }}
         onConfirmAction={handleConfirmAction}
         isSubmitting={isSubmitting}
