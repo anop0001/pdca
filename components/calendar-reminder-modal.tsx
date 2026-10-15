@@ -1,8 +1,8 @@
 'use client';
 
 import React from 'react';
-import { Calendar, Bell, ExternalLink, Download, X, CheckCircle2, ShieldCheck } from 'lucide-react';
-import { getGoogleCalendarUrl, downloadIcsFile, type CalendarEventOptions } from '@/lib/calendar';
+import { Calendar, Bell, ExternalLink, X, ShieldCheck } from 'lucide-react';
+import { getGoogleCalendarUrl, type CalendarEventOptions } from '@/lib/calendar';
 
 interface CalendarReminderModalProps {
   isOpen: boolean;
@@ -20,10 +20,6 @@ export function CalendarReminderModal({
   const handleOpenGoogleCalendar = () => {
     const url = getGoogleCalendarUrl(options);
     window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleDownloadIcs = () => {
-    downloadIcsFile(options);
   };
 
   return (
@@ -63,37 +59,21 @@ export function CalendarReminderModal({
           </div>
         </div>
 
-        <div className="space-y-2 pt-1">
+        <div className="pt-1">
           {/* Google カレンダー */}
           <button
             type="button"
             onClick={handleOpenGoogleCalendar}
-            className="w-full py-3 px-4 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 rounded-2xl text-xs font-bold flex items-center justify-between active:scale-[0.99] transition shadow-sm"
+            className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold flex items-center justify-between active:scale-[0.99] transition shadow-md"
           >
             <div className="flex items-center gap-2.5">
               <span className="text-base">📅</span>
               <div className="text-left">
                 <span className="block font-bold">Google カレンダーに登録</span>
-                <span className="text-[10px] text-slate-400 font-normal">ブラウザでGoogleカレンダーを開く</span>
+                <span className="text-[10px] text-emerald-100 font-normal">タップしてカレンダー予定に追加</span>
               </div>
             </div>
-            <ExternalLink className="w-4 h-4 text-slate-400" />
-          </button>
-
-          {/* iPhone / その他カレンダー (.ics) */}
-          <button
-            type="button"
-            onClick={handleDownloadIcs}
-            className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl text-xs font-bold flex items-center justify-between active:scale-[0.99] transition shadow-md"
-          >
-            <div className="flex items-center gap-2.5">
-              <span className="text-base">🍏</span>
-              <div className="text-left">
-                <span className="block font-bold">iPhone / その他カレンダー</span>
-                <span className="text-[10px] text-emerald-100 font-normal">タップして端末カレンダーに追加 (.ics)</span>
-              </div>
-            </div>
-            <Download className="w-4 h-4 text-emerald-100" />
+            <ExternalLink className="w-4 h-4 text-emerald-100" />
           </button>
         </div>
 
