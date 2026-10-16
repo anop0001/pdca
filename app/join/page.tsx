@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Users, Sparkles, CheckCircle2, ArrowRight } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { useLiff } from '@/components/liff-provider';
+import { getCurrentUserId } from '@/lib/supabase/auth';
 
 function JoinContent() {
   const router = useRouter();
@@ -55,7 +56,8 @@ function JoinContent() {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id || liffUser?.userId || '00000000-0000-0000-0000-000000000002';
+      const currentUserId = await getCurrentUserId(liffUser || undefined);
+      const userId = currentUserId || user?.id || '00000000-0000-0000-0000-000000000002';
 
       // 1. Supabaseの該当チームにメンバー登録
       const { data: orgData } = await supabase
@@ -148,7 +150,7 @@ function JoinContent() {
             <input
               type="text"
               required
-              placeholder="例: ANOP-2026"
+              placeholder="例: TEAM-2026"
               value={code}
               onChange={(e) => {
                 setCode(e.target.value);
