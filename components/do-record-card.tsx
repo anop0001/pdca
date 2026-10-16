@@ -103,7 +103,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
 
   return (
     <div
-      className={`p-4 rounded-2xl border transition shadow-sm ${
+      className={`p-4 rounded-2xl border transition-all duration-300 shadow-sm ${
         isCompleted
           ? 'bg-emerald-50/60 border-emerald-300 ring-1 ring-emerald-200'
           : 'bg-white border-gray-200/80 hover:border-gray-300'
@@ -189,26 +189,21 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
               本日の実行を完了しました！
             </>
           ) : (
-            'タップして本日の実行を記録'
+            <>
+              <span className="w-5 h-5 rounded-md border-2 border-gray-400 inline-block" />
+              タップして本日の完了を記録
+            </>
           )}
         </button>
       ) : (
         <div className="space-y-3">
-          <div>
-            <div className="flex justify-between items-center text-xs mb-1">
-              <span className="text-gray-500 font-medium">本日の実績</span>
-              <span className="font-bold text-gray-700">
-                {actualValue} / {version.target_value} {version.unit} ({progressPercent}%)
-              </span>
-            </div>
-            <div className="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-300 rounded-full ${
-                  isCompleted ? 'bg-emerald-500' : 'bg-emerald-400'
-                }`}
-                style={{ width: `${progressPercent}%` }}
-              />
-            </div>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 ${
+                isCompleted ? 'bg-emerald-500' : 'bg-emerald-400'
+              }`}
+              style={{ width: `${progressPercent}%` }}
+            />
           </div>
 
           <div className="flex items-center gap-2">
@@ -270,8 +265,10 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
         onClose={() => setShowCalendarModal(false)}
         options={{
           title: version.action_plan || plan.title,
+          targetValue: version.target_value,
+          unit: version.unit,
+          frequency: version.frequency,
           deadlineDate: version.deadline || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-          description: `目標値: ${version.target_value}${version.unit} の振り返り評価期日です。実績を確認して次のActionを決定しましょう！`,
         }}
       />
     </div>
