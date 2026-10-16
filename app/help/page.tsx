@@ -19,7 +19,10 @@ import {
   MessageSquare,
   ShieldCheck,
   Zap,
-  ArrowRight
+  ArrowRight,
+  Calendar,
+  Clock,
+  History
 } from 'lucide-react';
 
 interface FaqItem {
@@ -32,7 +35,12 @@ const FAQS: FaqItem[] = [
   {
     category: 'personal',
     question: 'Plan（目標）にはどんな内容を設定すればいいですか？',
-    answer: '「毎日20件テレアポする」「週に3日、30分筋トレする」など、数値で測定できる具体的な【行動（Do）】を設定するのがPDCAを回す最大のコツです。曖昧な目標（「営業を頑張る」など）だと、Check（評価）の際に達成・未達が客観的に判断できなくなってしまいます。',
+    answer: '「毎日20件テレアポする」「週に3日、30分ウォーキングする」など、数値で測定できる具体的な【行動（Do）】を設定するのがPDCAを回す最大のコツです。曖昧な目標（「営業を頑張る」など）だと、Check（評価）の際に達成・未達が客観的に判断できなくなってしまいます。',
+  },
+  {
+    category: 'personal',
+    question: 'Googleカレンダーの「行動ベース登録」とは何ですか？',
+    answer: '「最終締め切り日の1日だけ通知されても毎日の行動が継続できない」という課題を解消する機能です。朝・昼・夕方・夜・終日などの時間帯を選ぶだけで、締め切り期日まで【毎日繰り返す予定】としてGoogleカレンダーに一括登録されます。毎日の行動枠をカレンダー上で確実にブロック（タイムブロッキング）し、自走習慣を定着させることができます。',
   },
   {
     category: 'personal',
@@ -50,29 +58,39 @@ const FAQS: FaqItem[] = [
     answer: 'Checkで振り返った課題をもとに改善計画（次バージョンのPlan）を作成すると、目標のバージョンが自動で「v1 ➔ v2」へと更新され、過去の実績は「履歴」タブに蓄積されます。これによりPDCAが螺旋状に進化（スパイラルアップ）します。',
   },
   {
+    category: 'personal',
+    question: '「履歴」タブでは何が確認できますか？',
+    answer: '「履歴」タブでは、設定した目的（Objective）ごとに過去のPlanがグループ分けされて表示されます。過去のバージョン変遷（v1➔v2➔v3）や各サイクルの達成・未達結果、記録した実績数値をいつでも時系列で振り返ることができます。',
+  },
+  {
     category: 'team',
     question: 'メンバーはどうやって追加・招待すればいいですか？',
-    answer: '「チーム管理」画面の【LINE友だちを追加】ボタンをタップしてください。送信メッセージのプレビューが表示され、送信ボタンを押すとLINEの友だちリストから直接招待状を送信できます。相手がLINE内の参加リンクを開くだけでチームに加わります。',
+    answer: '「チーム管理」画面の【LINE友だちを追加】ボタンをタップしてください。送信メッセージのプレビューが表示され、送信ボタンを押すとLINEの友だちリストから直接招待状を送信できます。相手がLINE内の参加リンクを開くだけでチームに加わります。URLをコピーしてトークやグループに直接貼ることも可能です。',
   },
   {
     category: 'team',
-    question: 'LINEの友だち選択画面が開かない場合はどうすればいいですか？',
-    answer: 'モーダル内の【招待リンクをコピー】ボタンをタップし、コピーされた参加URLをご自身のLINEトークやグループチャットに直接貼り付けて送信してください。URLを開けば同様に参加できます。',
+    question: '他のチームや他人のデータと混ざる心配はありませんか？',
+    answer: 'ご安心ください。チーム管理機能はマルチテナント型で完全に独立しており、管理者が作成した自チームに所属するメンバーのデータのみが表示されます。他の管理者のチーム情報やメンバーのPlanと混ざることはありません。',
   },
   {
     category: 'team',
-    question: 'チーム名や招待コードを変更したいです。',
-    answer: '「チーム管理」画面上部にあるチーム名横の【✏️ 変更】ボタン、またはコード横の【設定】リンクから、いつでも自由なチーム名（例: 〇〇部、プロジェクトAチーム）や招待コードに変更・保存できます。',
+    question: '「確認のみ」と「アドバイス」の設計思想について',
+    answer: 'PDCA Checkでは「管理者の確認待ちでメンバーの手が止まる状態」や「指示されないと動けない受け身な状態」を作らない自走文化を大切にしています。管理者は【✅ 確認のみ】でサッと確認を完了して自走を促し、改善が必要な際も【💡 アドバイス】として本人の自発的な気づきと行動を支援します（コメント未入力でも自走を促すアドバイスが自動送信されます）。',
   },
   {
     category: 'team',
     question: 'サイクルの滞り（アラート）とは何ですか？',
-    answer: 'メンバーの目標で「期限が過ぎているのにCheckがされていない」「実績が未達のまま停滞している」「管理者の承認待ちになっている」状態を検知して表示します。管理者が早期にアドバイスやレビューを送ることで、メンバーの放置や挫折を防ぐことができます。',
+    answer: 'メンバーの目標で「期限が過ぎているのにCheckがされていない」「実績が未達のまま停滞している」「管理者のCheck確認待ちになっている」状態を検知して表示します。管理者が早期にアドバイスやリマインドを送ることで、メンバーの放置や挫折を防ぐことができます。',
   },
   {
     category: 'team',
     question: 'メンバーを除名（削除）することはできますか？',
-    answer: 'はい、チーム管理のメンバー一覧にある【🗑️ 除名】ボタンをタップすると、そのメンバーをチームから即時解除できます。',
+    answer: 'はい、チーム管理のメンバー一覧にある【🗑️ 除名】ボタンをタップすると、そのメンバーを自チームから即時解除できます。',
+  },
+  {
+    category: 'general',
+    question: '締め切り通知やリマインドにお金（LINE課金）はかかりますか？',
+    answer: 'いいえ、完全無料（0円）でご利用いただけます。LINE公式アカウントのメッセージ課金を回避するため、Googleカレンダーへの毎日の行動枠登録（毎日リピート通知）と、LINE友だち選択（シェア機能）による相互リマインドを採用しています。通数制限や月額費用の心配は一切ありません。',
   },
   {
     category: 'general',
@@ -116,7 +134,7 @@ export default function HelpPage() {
           PDCAサイクルを高速で回し、<br />目標を確実に達成する方法
         </h1>
         <p className="text-xs text-emerald-100 leading-relaxed pt-1">
-          日々の小さな実績記録から、自己評価・改善の更新、チームメンバーの進捗管理まで、アプリの使い方をわかりやすく解説します。
+          日々の小さな行動の積み重ねから、Googleカレンダーによる習慣化、自己評価・改善の更新、チームメンバーの自走支援まで、アプリの使い方をわかりやすく解説します。
         </p>
       </div>
 
@@ -177,9 +195,16 @@ export default function HelpPage() {
               「毎日20件架電する」「週3日30分ウォーキング」のように、
               <strong className="text-slate-800">数値（目標値）と単位</strong>をセットにするのがポイントです。
             </p>
-            <div className="p-2.5 bg-blue-50/60 rounded-xl border border-blue-100 text-[10px] text-blue-800 flex items-start gap-1.5">
-              <span className="text-xs">💡</span>
-              <span><strong>成功のコツ:</strong> 達成確率が80%程度と感じられる現実的な数字から始めると、毎日の継続習慣が身につきます。</span>
+
+            {/* Googleカレンダー連携コラム */}
+            <div className="p-3 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-xl border border-emerald-200 text-[11px] text-emerald-950 space-y-1.5">
+              <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-800">
+                <Calendar className="w-4 h-4 text-emerald-600" />
+                <span>Googleカレンダーに行動枠を自動登録（習慣化）</span>
+              </div>
+              <p className="text-[10px] text-emerald-800 leading-relaxed">
+                Plan作成時やカードの【カレンダー登録】から、朝（09:00〜）・昼・夕方・夜など好きな時間帯を選ぶだけで、期日まで「毎日繰り返す行動枠」としてカレンダーにワンタップ登録できます。スマホのアラーム通知で行き詰まりや忘れを防ぎます。
+              </p>
             </div>
           </div>
 
@@ -220,23 +245,30 @@ export default function HelpPage() {
             </p>
           </div>
 
-          {/* Step 4: Action */}
+          {/* Step 4: Action & 履歴 */}
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 text-purple-700 font-extrabold text-xs">
                 <RefreshCw className="w-4 h-4 text-purple-600" />
                 Step 4: Action（改善・次の計画）
               </span>
-              <span className="text-[10px] font-bold text-slate-400">次サイクルへ更新</span>
+              <span className="text-[10px] font-bold text-slate-400">次サイクルへ進化</span>
             </div>
             <h3 className="text-xs font-bold text-slate-900">改善策を反映し、Planをバージョンアップ</h3>
             <p className="text-[11px] text-slate-600 leading-relaxed">
               Checkの分析をもとに、次サイクルの目標値や行動内容を更新して保存します。
-              目標は自動で「v2 ➔ v3」と進化し、過去の記録は「履歴」タブに蓄積されます。
+              目標は自動で「v1 ➔ v2」と進化し、過去の記録は「履歴」タブに蓄積されます。
             </p>
-            <div className="p-2.5 bg-purple-50/60 rounded-xl border border-purple-100 text-[10px] text-purple-800 flex items-start gap-1.5">
-              <span className="text-xs">🚀</span>
-              <span><strong>スパイラルアップ:</strong> 失敗しても計画を見直して再挑戦することで、確実に業務成果や目標達成力が向上します。</span>
+            
+            {/* 履歴の案内 */}
+            <div className="p-2.5 bg-purple-50/60 rounded-xl border border-purple-100 text-[10px] text-purple-900 space-y-1">
+              <div className="flex items-center gap-1 font-bold text-purple-800">
+                <History className="w-3.5 h-3.5 text-purple-600" />
+                <span>「履歴」タブで目的別のスパイラルアップを可視化</span>
+              </div>
+              <p className="leading-relaxed">
+                設定した目的（Objective）ごとに過去のPlanがグループ化され、過去の実績値や改善の歩みが一目でわかります。
+              </p>
             </div>
           </div>
 
@@ -262,12 +294,12 @@ export default function HelpPage() {
           <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2">
             <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-800">
               <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-xs">1</div>
-              <span>チームを開設する</span>
+              <span>チームを開設する（完全分離・安全）</span>
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
               画面上の【チーム管理】を開き、開設ボタンを押すだけで管理者になります。
-              チーム名は最初から「[あなたのアカウント名]チーム」がセットされていますが、
-              画面上部の【✏️ 変更】からいつでも好きな名称に変更できます。
+              チームは自組織専用として完全に独立し、他管理者のデータと混ざる心配はありません。
+              チーム名や招待コードは【✏️ 変更】からいつでも好きな名称に変更できます。
             </p>
           </div>
 
@@ -279,8 +311,8 @@ export default function HelpPage() {
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
               【LINE友だちを追加】をタップすると、招待メッセージの作成画面が開きます。
-              メッセージ文面を確認・編集し、【LINEの友だちを選択して送信】を押すと、
-              LINEの友だちリストから招待したいメンバーを選んで即座に送信できます。
+              文面を確認・編集し、【LINEの友だちを選択して送信】を押すと、友だちリストから直接招待状を送信できます。
+              相手がLINE内の参加リンクを開くだけでチームに加わります。
             </p>
             <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-[10px] text-slate-600 flex items-start gap-1.5">
               <span className="text-xs">🔗</span>
@@ -300,28 +332,52 @@ export default function HelpPage() {
             <div className="grid grid-cols-3 gap-1.5 pt-1 text-center">
               <div className="p-2 bg-amber-50 rounded-xl border border-amber-200">
                 <span className="text-[10px] font-bold text-amber-800 block">確認待ち</span>
-                <span className="text-[9px] text-amber-600">Check提出済みで要レビュー</span>
+                <span className="text-[9px] text-amber-600">Check提出済み・要確認</span>
               </div>
-              <div className="p-2 bg-red-50 rounded-xl border border-red-200">
-                <span className="text-[10px] font-bold text-red-800 block">再提出待ち</span>
-                <span className="text-[9px] text-red-600">修正依頼にメンバーが対応中</span>
+              <div className="p-2 bg-amber-50/70 rounded-xl border border-amber-200">
+                <span className="text-[10px] font-bold text-amber-900 block">アドバイス</span>
+                <span className="text-[9px] text-amber-700">自走のヒントを共有中</span>
               </div>
               <div className="p-2 bg-emerald-50 rounded-xl border border-emerald-200">
-                <span className="text-[10px] font-bold text-emerald-800 block">確認完了</span>
-                <span className="text-[9px] text-emerald-600">順調に自走して進行中</span>
+                <span className="text-[10px] font-bold text-emerald-800 block">確認済み</span>
+                <span className="text-[9px] text-emerald-600">順調に自走継続中</span>
               </div>
             </div>
           </div>
 
-          {/* レビュー */}
-          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2">
+          {/* レビュー：確認のみ & アドバイス */}
+          <div className="p-4 rounded-2xl bg-white border border-slate-200 shadow-sm space-y-2.5">
             <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-800">
               <div className="w-5 h-5 rounded-full bg-emerald-100 flex items-center justify-center text-xs">4</div>
-              <span>レビュー & フィードバック</span>
+              <span>自走を促すレビュー（確認のみ / アドバイス）</span>
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed">
-              メンバーのカードにある【提出内容をレビューする】をタップすると、
-              実績とコメントを確認し、【✅ 確認完了（承認）】または【⚠️ 修正依頼】をアドバイスコメント付きで送信できます。
+              メンバーのカードにある【提出内容をレビューする】をタップすると、2種類のアクションが選べます：
+            </p>
+            <div className="grid grid-cols-2 gap-2 pt-0.5">
+              <div className="p-2.5 bg-emerald-50/70 rounded-xl border border-emerald-200 text-left space-y-1">
+                <span className="text-xs font-bold text-emerald-900 block">✅ 確認のみ</span>
+                <p className="text-[10px] text-emerald-800 leading-snug">
+                  管理者の確認待ちで作業を止めず、順調な自走をそのまま継続させます。
+                </p>
+              </div>
+              <div className="p-2.5 bg-amber-50/70 rounded-xl border border-amber-200 text-left space-y-1">
+                <span className="text-xs font-bold text-amber-950 block">💡 アドバイス</span>
+                <p className="text-[10px] text-amber-900 leading-snug">
+                  指示待ちにさせず、本人が自分で次の一手を打てるよう気づき・ヒントを共有します。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 無料LINEリマインド */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-200 shadow-sm space-y-2">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-800">
+              <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs">5</div>
+              <span>完全無料のLINE締め切りリマインド</span>
+            </div>
+            <p className="text-[11px] text-slate-600 leading-relaxed">
+              チーム画面の【📢 チームにLINEで締め切りリマインドを送信】や各メンバーの【💬 LINEリマインド】ボタンから、LINEのグループや個別トークに締め切り連絡をワンタップで送信できます。LINE公式の課金通数を一切消費しない完全無料機能です。
             </p>
           </div>
 
