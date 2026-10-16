@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, CheckCircle2, MessageSquare, AlertTriangle } from 'lucide-react';
+import { X, CheckCircle2, MessageSquare, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 
 export interface ReviewTargetData {
@@ -29,6 +29,8 @@ interface ReviewModalProps {
   onReviewSubmitted: (actionType?: string, comment?: string) => void;
 }
 
+import { getCurrentUserId } from '@/lib/supabase/auth';
+
 export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: ReviewModalProps) {
   const [actionType, setActionType] = useState<'confirmed' | 'questioned' | 'revision_requested'>('confirmed');
   const [comment, setComment] = useState('');
@@ -37,17 +39,24 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
-    if ((actionType === 'questioned' || actionType === 'revision_requested') && !comment.trim()) {
-      alert('「質問する」または「修正依頼」を選択した場合は、コメントを入力してください。');
+    if (actionType === 'questioned' && !comment.trim()) {
+      alert('「質問する」を選択した場合は、質問内容を入力してください。');
       return;
     }
 
     setIsSubmitting(true);
-    const finalComment = comment.trim() || (actionType === 'confirmed' ? '確認完了しました。この調子で進めてください！' : comment.trim());
+    const finalComment = comment.trim() || (
+      actionType === 'confirmed'
+        ? '確認しました！この調子で自走を続けてください。'
+        : actionType === 'revision_requested'
+        ? 'ナイスチャレンジ！次のアクションのヒントや気づきを参考に、次のサイクルを進めてみてください。'
+        : '質問内容をご確認ください。'
+    );
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const reviewerId = user?.id || '00000000-0000-0000-0000-000000000001';
+      const currentUserId = await getCurrentUserId();
+      const reviewerId = currentUserId || user?.id || '00000000-0000-0000-0000-000000000001';
 
       await supabase.from('reviews').insert({
         plan_id: data.planId,
@@ -66,8 +75,8 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
   const operatorLabel = data.operator === 'gte' ? '以上' : data.operator === 'lte' ? '以下' : '一致';
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-md bg-white rounded-t-3xl sm:rounded-3xl p-5 space-y-4 max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-[70] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-sm bg-white rounded-3xl p-5 space-y-4 max-h-[88vh] overflow-y-auto shadow-2xl border border-slate-100">
         <div className="flex items-center justify-between border-b pb-3">
           <div>
             <span className="text-[10px] font-bold text-gray-400 block">マネージャーレビュー</span>
@@ -139,7 +148,7 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
               }`}
             >
               <CheckCircle2 className={`w-4 h-4 mx-auto mb-1 ${actionType === 'confirmed' ? 'text-white' : 'text-emerald-600'}`} />
-              <span className="text-xs block">確認完了</span>
+              <span className="text-xs block font-bold">確認のみ</span>
             </button>
 
             <button
@@ -152,7 +161,7 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
               }`}
             >
               <MessageSquare className="w-4 h-4 mx-auto mb-1 text-blue-600" />
-              <span className="text-xs block">質問する</span>
+              <span className="text-xs block font-bold">質問する</span>
             </button>
 
             <button
@@ -160,18 +169,18 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
               onClick={() => setActionType('revision_requested')}
               className={`py-2.5 px-2 rounded-xl border text-center transition ${
                 actionType === 'revision_requested'
-                  ? 'border-red-600 bg-red-50 text-red-800 font-bold ring-1 ring-red-500'
+                  ? 'border-amber-600 bg-amber-50 text-amber-900 font-bold ring-1 ring-amber-500'
                   : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50'
               }`}
             >
-              <AlertTriangle className="w-4 h-4 mx-auto mb-1 text-red-600" />
-              <span className="text-xs block">修正依頼</span>
+              <AlertTriangle className="w-4 h-4 mx-auto mb-1 text-amber-600" />
+              <span className="text-xs block font-bold">アドバイス</span>
             </button>
           </div>
 
           <div className="space-y-1">
             <label className="text-[11px] font-semibold text-gray-600 block">
-              {actionType === 'confirmed' ? 'メッセージ (任意)' : 'フィードバック / 問いかけコメント (必須)'}
+              {actionType === 'confirmed' ? 'メッセージ (任意)' : 'フィードバック / アドバイスコメント (任意)'}
             </label>
             <textarea
               rows={3}
@@ -179,10 +188,10 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
               onChange={(e) => setComment(e.target.value)}
               placeholder={
                 actionType === 'confirmed'
-                  ? '例: 順調に進んでいます！この調子で次の期間も走り抜けてください。'
+                  ? '例: 確認しました！この調子で自走を続けてください。'
                   : actionType === 'questioned'
                   ? '例: 今回の未達要因について、行動量と実行方法のどちらに原因があると考えますか？'
-                  : '例: 目標基準が少し曖昧です。毎日数値でYes/Noがわかる指標に再設定してみてください。'
+                  : '例: ナイスチャレンジ！目標値が高すぎたかもしれないので、毎日続けられる数値に調整してみるのもおすすめです。'
               }
               className="w-full p-2.5 border border-gray-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-emerald-500"
             />
@@ -194,7 +203,18 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
             disabled={isSubmitting}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-md active:scale-98 disabled:opacity-50 transition"
           >
-            {isSubmitting ? '送信中...' : 'レビューを確定して送信'}
+            {isSubmitting ? (
+              <span className="flex items-center justify-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                送信中...
+              </span>
+            ) : actionType === 'confirmed' ? (
+              '確認を送信'
+            ) : actionType === 'revision_requested' ? (
+              'アドバイスを送信'
+            ) : (
+              '質問を送信'
+            )}
           </button>
         </div>
       </div>
