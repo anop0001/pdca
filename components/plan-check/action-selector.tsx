@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RotateCw, Wrench, Compass, CheckCircle2, ChevronRight, X, Loader2 } from 'lucide-react';
+import { RotateCw, Wrench, Compass, CheckCircle2, ChevronRight, X, Loader2, Calendar } from 'lucide-react';
+import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export type ActionType = 'continue' | 'revise' | 'alternative' | 'terminate';
 
@@ -36,6 +37,7 @@ export function ActionSelector({
 }: ActionSelectorProps) {
   const [selectedAction, setSelectedAction] = useState<ActionType>('continue');
   const [showReviseModal, setShowReviseModal] = useState(false);
+  const [showCalendarModal, setShowCalendarModal] = useState(false);
 
   const [revActionPlan, setRevActionPlan] = useState(currentCriteria.actionPlan);
   const [revTargetValue, setRevTargetValue] = useState(currentCriteria.targetValue);
@@ -230,7 +232,18 @@ export function ActionSelector({
               />
             </div>
 
-            <div className="pt-2">
+            {/* カレンダー連携（完全無料通知） */}
+            <button
+              type="button"
+              onClick={() => setShowCalendarModal(true)}
+              className="w-full py-2.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-98 transition shadow-xs"
+            >
+              <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+              <span>この期日をスマホカレンダーに登録</span>
+              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">無料</span>
+            </button>
+
+            <div className="pt-1">
               <button
                 type="button"
                 onClick={handleSaveRevision}
@@ -243,6 +256,19 @@ export function ActionSelector({
           </div>
         </div>
       )}
+
+      {/* カレンダーリマインドモーダル */}
+      <CalendarReminderModal
+        isOpen={showCalendarModal}
+        onClose={() => setShowCalendarModal(false)}
+        options={{
+          title: revActionPlan || 'Plan目標アクション',
+          targetValue: revTargetValue,
+          unit: revUnit,
+          frequency: 'daily',
+          deadlineDate: revDeadline,
+        }}
+      />
     </div>
   );
 }
