@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   History, 
@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
+import { useLiff } from '@/components/liff-provider';
 
 interface ActionRecord {
   action_type: 'continue' | 'revise' | 'alternative' | 'terminate';
@@ -65,31 +66,103 @@ interface ObjectiveGroup {
 }
 
 export default function HistoryPage() {
+  const { isReady, user: liffUser } = useLiff();
   const [objectives, setObjectives] = useState<ObjectiveGroup[]>([]);
   const [selectedObjectiveId, setSelectedObjectiveId] = useState<string>('all');
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function fetchHistoryData() {
-      setLoading(true);
-      try {
-        const currentUserId = await getCurrentUserId();
-        if (!currentUserId) {
-          setObjectives([]);
-          setLoading(false);
-          return;
-        }
+  const fetchHistoryData = useCallback(async () => {
+    setLoading(true);
+    try {
+      // 1. ローカルキャッシュに保存されているPlanのIDとデータを取得
+      let localPlans: any[] = [];
+      let localPlanIds: string[] = [];
+      if (typeof window !== 'undefined') {
+        try {
+          const raw = localStorage.getItem('pdca_local_plans');
+          if (raw) {
+            localPlans = JSON.parse(raw);
+            localPlanIds = localPlans.map((p: any) => p.id).filter(Boolean);
+          }
+        } catch {}
+      }
 
-        const { data, error } = await supabase
-          .from('objectives')
+      // 2. 現在のユーザーIDを特定
+      const currentUserId = await getCurrentUserId(liffUser || undefined);
+
+      // 3. ユーザーのPlanをSupabaseから取得（本人のuser_idに紐づくPlan）
+      const fetchedPlansMap = new Map<string, any>();
+
+      if (currentUserId) {
+        const { data: userPlans, error: userPlansError } = await supabase
+          .from('plans')
           .select(`
             id,
+            user_id,
             title,
             status,
-            plans (
+            objective_id,
+            objectives (
               id,
               title,
+              status
+            ),
+            plan_versions (
+              id,
+              version_number,
+              action_plan,
+              target_value,
+              unit,
+              operator,
+              frequency,
+              deadline,
+              start_date,
+              created_at,
+              checks (
+                id,
+                evaluation_date,
+                is_achieved,
+                target_summary,
+                actual_summary,
+                actions (
+                  action_type,
+                  reason,
+                  created_at
+                )
+              )
+            )
+          `)
+          .eq('user_id', currentUserId)
+          .order('created_at', { ascending: false });
+
+        if (userPlansError) {
+          console.warn('History fetch user plans error:', userPlansError);
+        }
+
+        if (userPlans) {
+          for (const p of userPlans) {
+            fetchedPlansMap.set(p.id, p);
+          }
+        }
+      }
+
+      // 4. 端末のローカルPlan IDのうち、まだ取得できていないものをSupabaseから直接ID指定で補完取得
+      const missingIds = localPlanIds.filter((id) => !fetchedPlansMap.has(id));
+      if (missingIds.length > 0) {
+        try {
+          const { data: missingPlans } = await supabase
+            .from('plans')
+            .select(`
+              id,
+              user_id,
+              title,
               status,
+              objective_id,
+              objectives (
+                id,
+                title,
+                status
+              ),
               plan_versions (
                 id,
                 version_number,
@@ -114,39 +187,92 @@ export default function HistoryPage() {
                   )
                 )
               )
-            )
-          `)
-          .eq('user_id', currentUserId)
-          .order('created_at', { ascending: false });
+            `)
+            .in('id', missingIds);
 
-        if (error) {
-          console.warn('History fetch error:', error);
+          if (missingPlans) {
+            for (const p of missingPlans) {
+              fetchedPlansMap.set(p.id, p);
+            }
+          }
+        } catch (e) {
+          console.warn('Missing plans fetch error:', e);
         }
-
-        const formatted: ObjectiveGroup[] = (data || []).map((obj: any) => ({
-          ...obj,
-          plans: (obj.plans || []).map((plan: any) => ({
-            ...plan,
-            plan_versions: (plan.plan_versions || []).sort(
-              (a: any, b: any) => a.version_number - b.version_number
-            ),
-          })),
-        }));
-
-        setObjectives(formatted);
-
-        if (formatted.length > 0 && selectedObjectiveId === 'all') {
-          setSelectedObjectiveId(formatted[0].id);
-        }
-      } catch (err) {
-        console.error('Fetch History Error:', err);
-      } finally {
-        setLoading(false);
       }
-    }
 
+      // 5. SupabaseになかったローカルPlanも補完
+      for (const lp of localPlans) {
+        if (!fetchedPlansMap.has(lp.id)) {
+          fetchedPlansMap.set(lp.id, {
+            id: lp.id,
+            title: lp.title,
+            status: lp.status || 'in_progress',
+            objective_id: lp.objective_id || '',
+            objectives: {
+              id: lp.objective_id || '',
+              title: lp.objectiveTitle || '目標設定',
+              status: 'active',
+            },
+            plan_versions: [
+              {
+                id: lp.currentVersion?.id || 'v1',
+                version_number: lp.currentVersion?.version_number || 1,
+                action_plan: lp.currentVersion?.action_plan || lp.title,
+                target_value: lp.currentVersion?.target_value || 1,
+                unit: lp.currentVersion?.unit || '回',
+                operator: lp.currentVersion?.operator || 'gte',
+                frequency: lp.currentVersion?.frequency || 'daily',
+                deadline: lp.currentVersion?.deadline || '',
+                start_date: lp.created_at?.split('T')[0] || new Date().toISOString().split('T')[0],
+                created_at: lp.created_at || new Date().toISOString(),
+                checks: [],
+              },
+            ],
+          });
+        }
+      }
+
+      // 6. すべてのPlanを目標（Objective）ごとにグループ化
+      const groupsMap = new Map<string, ObjectiveGroup>();
+
+      for (const plan of Array.from(fetchedPlansMap.values())) {
+        const objTitle = plan.objectives?.title || plan.objectiveTitle || '目標設定';
+        const objId = plan.objective_id || plan.objectives?.id || `obj-${objTitle}`;
+
+        if (!groupsMap.has(objId)) {
+          groupsMap.set(objId, {
+            id: objId,
+            title: objTitle,
+            status: plan.objectives?.status || 'active',
+            plans: [],
+          });
+        }
+
+        const sortedVersions = (plan.plan_versions || []).sort(
+          (a: any, b: any) => a.version_number - b.version_number
+        );
+
+        groupsMap.get(objId)!.plans.push({
+          id: plan.id,
+          title: plan.title,
+          status: plan.status,
+          plan_versions: sortedVersions,
+        });
+      }
+
+      const formatted = Array.from(groupsMap.values());
+      setObjectives(formatted);
+    } catch (err) {
+      console.error('Fetch History Error:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [liffUser]);
+
+  useEffect(() => {
+    if (!isReady) return;
     fetchHistoryData();
-  }, [selectedObjectiveId]);
+  }, [isReady, fetchHistoryData]);
 
   const filteredObjectives = useMemo(() => {
     if (selectedObjectiveId === 'all') return objectives;
