@@ -3,49 +3,151 @@
  * 連携して完全無料（0円）でリマインダー・アラーム通知を登録するためのユーティリティ
  */
 
+export type TimeSlot = 'morning' | 'noon' | 'evening' | 'night' | 'all_day' | 'custom';
+
 export interface CalendarEventOptions {
   title: string;
   description?: string;
-  deadlineDate: string; // 'YYYY-MM-DD'
+  deadlineDate?: string; // 'YYYY-MM-DD'
+  targetValue?: number | string;
+  unit?: string;
+  frequency?: string; // 'daily' | 'weekdays' | 'weekly' etc.
   appUrl?: string;
+  mode?: 'action' | 'deadline'; // default 'action' (行動ベース)
+  timeSlot?: TimeSlot;
+  customStartTime?: string; // 'HH:mm'
+  customDurationMinutes?: number; // e.g. 30
 }
+
+export const TIME_SLOT_CONFIG: Record<
+  Exclude<TimeSlot, 'custom' | 'all_day'>,
+  { label: string; icon: string; start: string; end: string; duration: number }
+> = {
+  morning: { label: '朝', icon: '☀️', start: '09:00', end: '09:30', duration: 30 },
+  noon: { label: '昼', icon: '🕛', start: '12:30', end: '13:00', duration: 30 },
+  evening: { label: '夕方', icon: '🌆', start: '18:00', end: '18:30', duration: 30 },
+  night: { label: '夜', icon: '🌙', start: '21:00', end: '21:30', duration: 30 },
+};
 
 /**
  * Googleカレンダー登録用のWeb URLを生成
  */
 export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
-  const { title, description, deadlineDate, appUrl } = options;
-  
-  // 日付文字列のパース（YYYY-MM-DD）
-  const parts = deadlineDate.split('-');
-  const y = parts[0] || '2026';
-  const m = parts[1] || '01';
-  const d = parts[2] || '01';
-  
-  // 終日イベント: 開始日と終了日(翌日)
-  const startDateStr = `${y}${m}${d}`;
-  const nextDate = new Date(`${y}-${m}-${d}T00:00:00+09:00`);
-  nextDate.setDate(nextDate.getDate() + 1);
-  const ny = nextDate.getFullYear();
-  const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
-  const nd = String(nextDate.getDate()).padStart(2, '0');
-  const endDateStr = `${ny}${nm}${nd}`;
+  const {
+    title,
+    description,
+    deadlineDate,
+    targetValue,
+    unit = '回',
+    frequency = 'daily',
+    appUrl,
+    mode = 'action',
+    timeSlot = 'morning',
+    customStartTime = '09:00',
+    customDurationMinutes = 30,
+  } = options;
 
-  const eventTitle = `【PDCA評価期日】${title}`;
-  const eventDetails = [
-    description || '目標のPDCA評価締め切り日です。実績を確認して次のActionを決めましょう！',
-    '',
-    `▼PDCAアプリを開いて確認・改訂:`,
-    appUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://pdca-mauve.vercel.app/'),
-  ].join('\n');
+  const originUrl = appUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://pdca-mauve.vercel.app/');
 
-  const params = new URLSearchParams({
+  // 今日のJST日付（YYYY-MM-DD）
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  const todayStr = jstNow.toISOString().slice(0, 10);
+
+  // タイトル
+  const eventTitle = mode === 'deadline'
+    ? `【PDCA評価期日】${title}`
+    : `【PDCA実行】${title}${targetValue ? ` (${targetValue}${unit})` : ''}`;
+
+  // 詳細説明
+  const eventDetails = mode === 'deadline'
+    ? [
+        description || '目標のPDCA評価締め切り日です。実績を確認して次のActionを決めましょう！',
+        '',
+        '▼PDCAアプリを開いて確認・改訂:',
+        originUrl,
+      ].join('\n')
+    : [
+        `🎯 本日のPDCA行動目標: ${title}`,
+        targetValue ? `目標値: ${targetValue}${unit}` : '',
+        '',
+        '行動を実行したら、PDCAアプリを開いて実績を入力しましょう！',
+        '▼PDCA記録を開く👇',
+        originUrl,
+      ].filter(Boolean).join('\n');
+
+  let datesParam = '';
+  let recurParam: string | null = null;
+
+  if (mode === 'deadline') {
+    // 締め切り日単発（終日予定）
+    const targetDateStr = deadlineDate || todayStr;
+    const [y, m, d] = targetDateStr.split('-');
+    const startDateStr = `${y}${m}${d}`;
+    const nextDate = new Date(`${y}-${m}-${d}T00:00:00+09:00`);
+    nextDate.setDate(nextDate.getDate() + 1);
+    const ny = nextDate.getFullYear();
+    const nm = String(nextDate.getMonth() + 1).padStart(2, '0');
+    const nd = String(nextDate.getDate()).padStart(2, '0');
+    datesParam = `${startDateStr}/${ny}${nm}${nd}`;
+  } else {
+    // 行動ベース（指定時間帯 or 終日 ＋ 締め切り日まで毎日リピート）
+    if (timeSlot === 'all_day') {
+      const ymd = todayStr.replace(/-/g, '');
+      const nextDate = new Date(`${todayStr}T00:00:00+09:00`);
+      nextDate.setDate(nextDate.getDate() + 1);
+      const nextYmd = nextDate.toISOString().slice(0, 10).replace(/-/g, '');
+      datesParam = `${ymd}/${nextYmd}`;
+    } else {
+      let startTimeStr = '09:00';
+      let durationMin = 30;
+
+      if (timeSlot === 'custom') {
+        startTimeStr = customStartTime || '09:00';
+        durationMin = customDurationMinutes || 30;
+      } else if (TIME_SLOT_CONFIG[timeSlot]) {
+        startTimeStr = TIME_SLOT_CONFIG[timeSlot].start;
+        durationMin = TIME_SLOT_CONFIG[timeSlot].duration;
+      }
+
+      const startJst = new Date(`${todayStr}T${startTimeStr}:00+09:00`);
+      const endJst = new Date(startJst.getTime() + durationMin * 60000);
+
+      const startUtc = startJst.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      const endUtc = endJst.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      datesParam = `${startUtc}/${endUtc}`;
+    }
+
+    // 繰り返しルール (RRULE)
+    let freqRule = 'FREQ=DAILY';
+    if (frequency === 'weekdays') {
+      freqRule = 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
+    } else if (frequency === 'weekly') {
+      freqRule = 'FREQ=WEEKLY';
+    }
+
+    if (deadlineDate) {
+      const untilDate = new Date(`${deadlineDate}T23:59:59+09:00`);
+      const untilUtc = untilDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+      recurParam = `RRULE:${freqRule};UNTIL=${untilUtc}`;
+    } else {
+      recurParam = `RRULE:${freqRule}`;
+    }
+  }
+
+  const queryParams: Record<string, string> = {
     action: 'TEMPLATE',
     text: eventTitle,
     details: eventDetails,
-    dates: `${startDateStr}/${endDateStr}`,
-  });
+    dates: datesParam,
+    ctz: 'Asia/Tokyo',
+  };
 
+  if (recurParam) {
+    queryParams.recur = recurParam;
+  }
+
+  const params = new URLSearchParams(queryParams);
   return `https://calendar.google.com/calendar/render?${params.toString()}`;
 }
 
@@ -55,7 +157,8 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
  */
 export function generateIcsContent(options: CalendarEventOptions): string {
   const { title, description, deadlineDate, appUrl } = options;
-  const parts = deadlineDate.split('-');
+  const targetDate = deadlineDate || new Date().toISOString().slice(0, 10);
+  const parts = targetDate.split('-');
   const y = parts[0] || '2026';
   const m = parts[1] || '01';
   const d = parts[2] || '01';
@@ -117,7 +220,7 @@ export function downloadIcsFile(options: CalendarEventOptions): void {
   
   const a = document.createElement('a');
   a.href = url;
-  a.download = `pdca-reminder-${options.deadlineDate}.ics`;
+  a.download = `pdca-reminder-${options.deadlineDate || 'daily'}.ics`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
