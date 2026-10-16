@@ -182,8 +182,10 @@ export function Step3Criteria() {
         onClose={() => setShowCalendarModal(false)}
         options={{
           title: actionPlan || 'PDCA目標アクション',
+          targetValue: targetValue || 1,
+          unit: unit || '回',
+          frequency: frequency || 'daily',
           deadlineDate: deadline || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
-          description: `目標値: ${targetValue || 1}${unit || '回'} の振り返り評価期日です。実績を確認して次のActionを決定しましょう！`,
         }}
       />
     </div>
