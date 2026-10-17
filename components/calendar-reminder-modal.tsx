@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Calendar, Bell, ExternalLink, X, ShieldCheck, Clock, Check, Sparkles } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Calendar, Bell, ExternalLink, X, ShieldCheck, Clock, Check, Sparkles, RefreshCw } from 'lucide-react';
 import {
   getGoogleCalendarUrl,
   type CalendarEventOptions,
   type TimeSlot,
   TIME_SLOT_CONFIG,
+  FREQUENCY_CONFIG,
 } from '@/lib/calendar';
 
 interface CalendarReminderModalProps {
@@ -20,16 +21,32 @@ export function CalendarReminderModal({
   onClose,
   options,
 }: CalendarReminderModalProps) {
-  const [mode, setMode] = useState<'action' | 'deadline'>('action');
+  const initialFreq = options.frequency || 'daily';
+  const [frequency, setFrequency] = useState<string>(initialFreq);
+  const [mode, setMode] = useState<'action' | 'deadline'>(initialFreq === 'single' ? 'deadline' : 'action');
   const [timeSlot, setTimeSlot] = useState<TimeSlot>('morning');
   const [customStartTime, setCustomStartTime] = useState<string>('09:00');
   const [customDuration, setCustomDuration] = useState<number>(30);
 
+  useEffect(() => {
+    if (options.frequency) {
+      setFrequency(options.frequency);
+      if (options.frequency === 'single') {
+        setMode('deadline');
+      } else {
+        setMode('action');
+      }
+    }
+  }, [options.frequency]);
+
   if (!isOpen) return null;
+
+  const freqCfg = FREQUENCY_CONFIG[frequency] || FREQUENCY_CONFIG.daily;
 
   const handleOpenGoogleCalendar = () => {
     const url = getGoogleCalendarUrl({
       ...options,
+      frequency,
       mode,
       timeSlot,
       customStartTime,
@@ -39,7 +56,7 @@ export function CalendarReminderModal({
   };
 
   const getSlotDisplayLabel = () => {
-    if (timeSlot === 'all_day') return '終日予定（時間指定なし）';
+    if (timeSlot === 'all_day') return '終日タスク（時間指定なし）';
     if (timeSlot === 'custom') return `${customStartTime} 〜 (${customDuration}分間)`;
     const cfg = TIME_SLOT_CONFIG[timeSlot];
     return cfg ? `${cfg.label} ${cfg.start}〜${cfg.end}` : '09:00〜09:30';
@@ -72,7 +89,10 @@ export function CalendarReminderModal({
         <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl">
           <button
             type="button"
-            onClick={() => setMode('action')}
+            onClick={() => {
+              setMode('action');
+              if (frequency === 'single') setFrequency('daily');
+            }}
             className={`py-2 px-2 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 ${
               mode === 'action'
                 ? 'bg-white text-emerald-800 shadow-xs'
@@ -80,7 +100,7 @@ export function CalendarReminderModal({
             }`}
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-            <span>毎日の行動予定</span>
+            <span>{freqCfg.tabLabel}</span>
           </button>
           <button
             type="button"
@@ -102,8 +122,8 @@ export function CalendarReminderModal({
             {/* 行動目標のサマリー */}
             <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl space-y-1">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-emerald-800 uppercase">
-                  日々の行動リマインド（毎日リピート）
+                <span className="text-[10px] font-bold text-emerald-800 uppercase flex items-center gap-1">
+                  <span>行動リマインド（{freqCfg.badge}）</span>
                 </span>
                 {options.deadlineDate && (
                   <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded-full border border-emerald-200">
@@ -114,9 +134,51 @@ export function CalendarReminderModal({
               <p className="text-xs font-bold text-emerald-950 line-clamp-2">{options.title}</p>
               {options.targetValue && (
                 <p className="text-[11px] text-emerald-800 font-medium">
-                  目標: 毎日 {options.targetValue}{options.unit || '回'}
+                  目標: {freqCfg.label} {options.targetValue}{options.unit || '回'}
                 </p>
               )}
+            </div>
+
+            {/* 実行頻度の選択（目標設定と完全連動） */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 text-emerald-600" />
+                  <span>実行頻度（連動）</span>
+                </label>
+                <span className="text-[10px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                  Plan設定と連動中
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { id: 'daily', label: '毎日' },
+                  { id: 'weekday', label: '平日のみ' },
+                  { id: 'weekly', label: '毎週' },
+                  { id: 'single', label: '期日までに1度' },
+                ].map((item) => {
+                  const isMatch = frequency === item.id || (frequency === 'weekdays' && item.id === 'weekday');
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setFrequency(item.id);
+                        if (item.id === 'single') {
+                          setMode('deadline');
+                        }
+                      }}
+                      className={`py-2 px-2 text-xs rounded-xl border text-center transition ${
+                        isMatch
+                          ? 'border-emerald-600 bg-emerald-50 text-emerald-800 font-bold ring-1 ring-emerald-500 shadow-xs'
+                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* 時間帯スロット選択 */}
@@ -223,10 +285,10 @@ export function CalendarReminderModal({
             {/* プレビュー表示 */}
             <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-[11px] text-slate-600">
               <span className="font-bold text-slate-700 block">予定内容プレビュー:</span>
-              <span>毎日 {getSlotDisplayLabel()}</span>
+              <span className="font-semibold text-emerald-900">{freqCfg.label} {getSlotDisplayLabel()}</span>
               {options.deadlineDate && (
-                <span className="text-slate-400 block text-[10px]">
-                  ※締め切り期日（{options.deadlineDate}）まで毎日繰り返し登録されます
+                <span className="text-slate-400 block text-[10px] mt-0.5">
+                  ※締め切り期日（{options.deadlineDate}）まで【{freqCfg.badge}】としてGoogleカレンダーに登録されます
                 </span>
               )}
             </div>
@@ -261,10 +323,10 @@ export function CalendarReminderModal({
               <span className="text-base">📅</span>
               <div className="text-left">
                 <span className="block font-bold">
-                  {mode === 'action' ? 'Google カレンダーに行動枠を登録' : 'Google カレンダーに期日を登録'}
+                  {mode === 'action' ? `Google カレンダーに【${freqCfg.label}枠】を登録` : 'Google カレンダーに期日を登録'}
                 </span>
                 <span className="text-[10px] text-emerald-100 font-normal">
-                  {mode === 'action' ? 'タップして毎日の予定に一括追加' : 'タップして評価期日に追加'}
+                  {mode === 'action' ? `タップしてGoogleカレンダーに${freqCfg.badge}で追加` : 'タップして評価期日に追加'}
                 </span>
               </div>
             </div>
@@ -276,7 +338,7 @@ export function CalendarReminderModal({
         <div className="flex items-start gap-1.5 text-[10px] text-slate-400 pt-0.5">
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0 mt-0.5" />
           <span>
-            LINE公式の有料メッセージ通数を一切消費せず、スマホ本体のカレンダー通知で毎日の行動時間を確実にブロックして習慣化できます。
+            LINE公式の有料メッセージ通数を一切消費せず、スマホ本体のカレンダー通知で行動時間を確実に確保して習慣化できます。
           </span>
         </div>
       </div>
