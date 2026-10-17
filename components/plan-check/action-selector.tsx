@@ -265,7 +265,7 @@ export function ActionSelector({
           title: revActionPlan || 'Plan目標アクション',
           targetValue: revTargetValue,
           unit: revUnit,
-          frequency: 'daily',
+          frequency: revFrequency || currentCriteria.frequency || 'daily',
           deadlineDate: revDeadline,
         }}
       />
