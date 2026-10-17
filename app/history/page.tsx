@@ -17,7 +17,8 @@ import {
   Loader2,
   ChevronRight,
   TrendingUp,
-  ClipboardX
+  ClipboardX,
+  PauseCircle
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
@@ -33,9 +34,32 @@ interface CheckRecord {
   id: string;
   evaluation_date: string;
   is_achieved: boolean;
+  objective_outcome?: 'achieved' | 'unachieved' | 'suspended' | 'unrecorded';
+  outcome_memo?: string;
   target_summary: string;
   actual_summary: string;
   actions?: ActionRecord[];
+}
+
+type ObjectiveOutcome = 'achieved' | 'unachieved' | 'suspended' | 'unrecorded';
+
+function parseObjectiveOutcome(check?: CheckRecord): ObjectiveOutcome | null {
+  if (!check) return null;
+  if (check.objective_outcome) return check.objective_outcome;
+  if (check.actual_summary) {
+    if (check.actual_summary.includes('[大目的:達成]')) return 'achieved';
+    if (check.actual_summary.includes('[大目的:未達成]')) return 'unachieved';
+    if (check.actual_summary.includes('[大目的:中断]')) return 'suspended';
+    if (check.actual_summary.includes('[大目的:記録なし]')) return 'unrecorded';
+  }
+  if (
+    check.actual_summary?.includes('記録 0') ||
+    check.actual_summary?.includes('記録なし') ||
+    check.actual_summary?.includes('未記録')
+  ) {
+    return 'unrecorded';
+  }
+  return check.is_achieved ? 'achieved' : 'unachieved';
 }
 
 interface DoRecordItem {
@@ -478,6 +502,37 @@ export default function HistoryPage() {
         }
       }
 
+      // 5.6. ローカルストレージ（pdca_local_checks）のチェック結果を各PlanVersionに合体反映
+      const localChecksMap = new Map<string, any[]>();
+      if (typeof window !== 'undefined') {
+        try {
+          const checksRaw = localStorage.getItem('pdca_local_checks');
+          if (checksRaw) {
+            const list = JSON.parse(checksRaw);
+            for (const chk of list) {
+              const vKey = chk.plan_version_id || chk.plan_id;
+              if (vKey) {
+                if (!localChecksMap.has(vKey)) localChecksMap.set(vKey, []);
+                localChecksMap.get(vKey)!.push(chk);
+              }
+            }
+          }
+        } catch {}
+      }
+
+      for (const plan of Array.from(fetchedPlansMap.values())) {
+        if (plan.plan_versions) {
+          for (const ver of plan.plan_versions) {
+            if (!ver.checks || ver.checks.length === 0) {
+              const localChecks = localChecksMap.get(ver.id) || localChecksMap.get(plan.id) || [];
+              if (localChecks.length > 0) {
+                ver.checks = localChecks;
+              }
+            }
+          }
+        }
+      }
+
       // 6. すべてのPlanを目標（Objective）ごとにグループ化
       const groupsMap = new Map<string, ObjectiveGroup>();
 
@@ -657,6 +712,7 @@ export default function HistoryPage() {
 
                   <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-3 before:bottom-3 before:w-0.5 before:bg-emerald-200">
                     {plan.plan_versions.map((ver, idx) => {
+                      const todayStr = getTodayJSTString();
                       const isLatest = idx === plan.plan_versions.length - 1;
                       const check = ver.checks?.[0];
                       const action = check?.actions?.[0];
@@ -664,6 +720,10 @@ export default function HistoryPage() {
 
                       const isTargetChanged = prevVer && prevVer.target_value !== ver.target_value;
                       const stats = computeVersionStats(ver, idx, plan.plan_versions, plan.do_records || []);
+
+                      // 期日到来判定 & 大目的4段階ステータス
+                      const isExpired = Boolean(ver.deadline && ver.deadline <= todayStr);
+                      const outcome = parseObjectiveOutcome(check);
 
                       return (
                         <div key={ver.id} className="relative group">
@@ -680,17 +740,48 @@ export default function HistoryPage() {
                           <div
                             className={`p-3.5 rounded-2xl border transition-all ${
                               isLatest
-                                ? 'bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-200/70'
+                                ? isExpired && !check
+                                  ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200'
+                                  : 'bg-emerald-50/40 border-emerald-300 ring-1 ring-emerald-200/70'
                                 : 'bg-gray-50/70 border-gray-200'
                             }`}
                           >
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5">
+                            <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+                              <span className="text-xs font-bold text-gray-900 flex items-center gap-1.5 flex-wrap">
                                 Ver. {ver.version_number}
-                                {isLatest ? (
-                                  <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
-                                    現在進行中
-                                  </span>
+                                {check ? (
+                                  outcome === 'achieved' ? (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white flex items-center gap-1">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      大目的: 達成 🎉
+                                    </span>
+                                  ) : outcome === 'unachieved' ? (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-rose-600 text-white flex items-center gap-1">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      大目的: 未達成 ⚠️
+                                    </span>
+                                  ) : outcome === 'suspended' ? (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-orange-600 text-white flex items-center gap-1">
+                                      <PauseCircle className="w-3 h-3" />
+                                      大目的: 中断 ⏸️
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-slate-600 text-white flex items-center gap-1">
+                                      <ClipboardX className="w-3 h-3" />
+                                      大目的: 記録なし 📝
+                                    </span>
+                                  )
+                                ) : isLatest ? (
+                                  isExpired ? (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-amber-500 text-white flex items-center gap-1 shadow-xs animate-pulse">
+                                      <AlertTriangle className="w-3 h-3" />
+                                      期日終了 (要Check)
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                                      現在進行中
+                                    </span>
+                                  )
                                 ) : (
                                   <span className="text-[10px] font-medium text-gray-400">
                                     改訂完了
@@ -765,45 +856,90 @@ export default function HistoryPage() {
                               </div>
                             </div>
 
-                            {check && (() => {
-                              const isUnrecorded = check.actual_summary?.includes('未記録') || 
-                                check.actual_summary?.includes('記録 0') || 
-                                check.actual_summary?.includes('0日') ||
-                                check.actual_summary?.includes('記録なし');
-
-                              return (
-                                <div className="mt-2.5 pt-2 border-t border-gray-200/70 space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="text-[11px] text-gray-500 font-medium">Check判定:</span>
-                                    {isUnrecorded ? (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
-                                        <ClipboardX className="w-3 h-3 text-slate-500" />
-                                        未記録（データなし） 📝
-                                      </span>
-                                    ) : check.is_achieved ? (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                                        <CheckCircle2 className="w-3 h-3" />
-                                        目標達成 🎉
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                                        <AlertTriangle className="w-3 h-3" />
-                                        未達成 ⚠️
-                                      </span>
-                                    )}
+                            {/* 期日終了・大目的確認促進バナー */}
+                            {!check && isLatest && isExpired && (
+                              <div className="mt-2.5 pt-2 border-t border-amber-200/80">
+                                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                  <div className="space-y-1">
+                                    <div className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+                                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                      <span>期日（{ver.deadline}）を迎えました</span>
+                                    </div>
+                                    <p className="text-[11px] text-amber-800 leading-snug">
+                                      大目的「{obj.title}」の達成結果（達成・未達成・中断・記録なし）を確認し、次の方針（Action）を決定しましょう。
+                                    </p>
                                   </div>
-                                  <p className="text-[11px] text-gray-600 bg-white/70 p-1.5 rounded-lg border border-gray-100">
-                                    {check.actual_summary}
-                                  </p>
+                                  <Link
+                                    href={`/plans/${plan.id}/check`}
+                                    className="shrink-0 inline-flex items-center justify-center gap-1 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white rounded-lg text-xs font-bold shadow-xs transition"
+                                  >
+                                    <span>大目的を確認・Check</span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </Link>
+                                </div>
+                              </div>
+                            )}
 
+                            {!check && isLatest && !isExpired && (
+                              <div className="mt-2 text-right">
+                                <Link
+                                  href={`/plans/${plan.id}/check`}
+                                  className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:underline font-bold"
+                                >
+                                  <span>Check / 振り返りを行う</span>
+                                  <ArrowRight className="w-3 h-3" />
+                                </Link>
+                              </div>
+                            )}
+
+                            {check && (() => {
+                              return (
+                                <div className="mt-2.5 pt-2 border-t border-gray-200/70 space-y-2">
+                                  {/* 大目的の確認結果 */}
+                                  <div className="p-2.5 rounded-xl bg-gray-50/90 border border-gray-200/80 space-y-1.5">
+                                    <div className="flex items-center justify-between text-xs">
+                                      <span className="text-[11px] text-gray-500 font-bold flex items-center gap-1">
+                                        <Target className="w-3 h-3 text-emerald-600 shrink-0" />
+                                        大目的の達成確認:
+                                      </span>
+                                      {outcome === 'achieved' ? (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-emerald-700 bg-emerald-100/90 border border-emerald-300 px-2 py-0.5 rounded-full">
+                                          <CheckCircle2 className="w-3 h-3" />
+                                          達成 🎉
+                                        </span>
+                                      ) : outcome === 'unachieved' ? (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-rose-700 bg-rose-100/90 border border-rose-300 px-2 py-0.5 rounded-full">
+                                          <AlertTriangle className="w-3 h-3" />
+                                          未達成 ⚠️
+                                        </span>
+                                      ) : outcome === 'suspended' ? (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-orange-700 bg-orange-100/90 border border-orange-300 px-2 py-0.5 rounded-full">
+                                          <PauseCircle className="w-3 h-3" />
+                                          中断 ⏸️
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 text-[11px] font-extrabold text-slate-700 bg-slate-200/90 border border-slate-300 px-2 py-0.5 rounded-full">
+                                          <ClipboardX className="w-3 h-3" />
+                                          記録なし 📝
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-[11px] text-gray-700 leading-relaxed bg-white p-2 rounded-lg border border-gray-100">
+                                      {check.actual_summary}
+                                    </p>
+                                  </div>
+
+                                  {/* 次の方針 (Action) */}
                                   {action && (
-                                    <div className="flex items-start gap-1.5 text-[11px] text-gray-600 pt-0.5">
-                                      <span className="font-bold shrink-0 text-emerald-800">Action:</span>
-                                      <span>
-                                        <strong className="text-gray-800">
-                                          {ACTION_CONFIG[action.action_type]?.label || action.action_type}
-                                        </strong>
-                                        {action.reason && `（${action.reason}）`}
+                                    <div className="flex items-center justify-between text-xs p-2 bg-emerald-50/60 rounded-xl border border-emerald-100">
+                                      <span className="text-[11px] font-bold text-emerald-900 flex items-center gap-1">
+                                        <span>次の方針 (Action):</span>
+                                      </span>
+                                      <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black border ${
+                                        ACTION_CONFIG[action.action_type]?.color || 'bg-gray-100 text-gray-700 border-gray-200'
+                                      }`}>
+                                        {React.createElement(ACTION_CONFIG[action.action_type]?.icon || RotateCw, { className: 'w-3 h-3' })}
+                                        {ACTION_CONFIG[action.action_type]?.label || action.action_type}
                                       </span>
                                     </div>
                                   )}
