@@ -162,6 +162,31 @@ export default function HomePage() {
         }
 
         if (plansData) {
+          // ローカルストレージ内のレコードキャッシュを取得（Supabase未反映分を救済）
+          const localTodayRecordsMap = new Map<string, any>();
+          if (typeof window !== 'undefined') {
+            try {
+              const recRaw = localStorage.getItem('pdca_local_records');
+              if (recRaw) {
+                const recList = JSON.parse(recRaw);
+                for (const r of recList) {
+                  if (r.plan_id && r.record_date === todayStr) {
+                    localTodayRecordsMap.set(r.plan_id, r);
+                  }
+                }
+              }
+              const plansRaw = localStorage.getItem('pdca_local_plans');
+              if (plansRaw) {
+                const pList = JSON.parse(plansRaw);
+                for (const lp of pList) {
+                  if (lp.id && lp.todayRecord && !localTodayRecordsMap.has(lp.id)) {
+                    localTodayRecordsMap.set(lp.id, lp.todayRecord);
+                  }
+                }
+              }
+            } catch {}
+          }
+
           formattedPlans = plansData.map((p: any) => {
             const sortedVersions = (p.plan_versions || []).sort(
               (a: any, b: any) => b.version_number - a.version_number
@@ -176,16 +201,20 @@ export default function HomePage() {
               deadline: '',
             };
 
-            const todayRecord = (p.do_records || []).find(
+            const sbTodayRecord = (p.do_records || []).find(
               (r: any) => r.record_date === todayStr
             );
+            const localRec = localTodayRecordsMap.get(p.id);
+
+            // Supabaseレコードを優先、無ければローカルキャッシュを採用
+            const todayRecord = sbTodayRecord || localRec || null;
 
             return {
               id: p.id,
               title: p.title,
               objectiveTitle: p.objectives?.title || '目的未設定',
               currentVersion,
-              todayRecord: todayRecord || null,
+              todayRecord,
             };
           });
         }
@@ -199,7 +228,6 @@ export default function HomePage() {
           try {
             const localList: (PlanWithDetails & { userId?: string })[] = JSON.parse(localRaw);
             for (const lp of localList) {
-              // 自身のPlanまたは端末作成Planのみ表示（他人のuserIdが付いているものは除外）
               if (lp.userId && currentUserId && lp.userId !== currentUserId) {
                 continue;
               }
@@ -209,9 +237,7 @@ export default function HomePage() {
             }
           } catch {}
         }
-        if (formattedPlans.length > 0) {
-          localStorage.setItem('pdca_local_plans', JSON.stringify(formattedPlans));
-        }
+        localStorage.setItem('pdca_local_plans', JSON.stringify(allPlans));
       }
 
       setPlans(allPlans);
@@ -241,36 +267,66 @@ export default function HomePage() {
     try {
       const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
 
-      // Supabaseへの保存を試みる
-      try {
-        await supabase
-          .from('do_records')
-          .upsert(
-            {
-              plan_id: planId,
-              plan_version_id: versionId,
-              user_id: currentUserId,
-              record_date: todayStr,
-              actual_value: actualValue,
-              is_completed: isCompleted,
-              updated_at: new Date().toISOString(),
-            },
-            {
-              onConflict: 'plan_id, record_date',
-            }
+      const isValidUUID = (val?: string | null) =>
+        Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+      // 1. ローカルレコードキャッシュ（pdca_local_records）に即座に確実に保存
+      const newRecord = {
+        id: 'rec-' + Date.now(),
+        plan_id: planId,
+        plan_version_id: isValidUUID(versionId) ? versionId : null,
+        user_id: currentUserId,
+        record_date: todayStr,
+        actual_value: actualValue,
+        is_completed: isCompleted,
+        updated_at: new Date().toISOString(),
+      };
+
+      if (typeof window !== 'undefined') {
+        try {
+          const recRaw = localStorage.getItem('pdca_local_records');
+          let recList = recRaw ? JSON.parse(recRaw) : [];
+          recList = recList.filter(
+            (r: any) => !(r.plan_id === planId && r.record_date === todayStr)
           );
-      } catch (err) {
-        console.warn('Supabase record save warning:', err);
+          recList.push(newRecord);
+          localStorage.setItem('pdca_local_records', JSON.stringify(recList));
+        } catch (e) {
+          console.warn('Local records save error:', e);
+        }
+
+        // pdca_local_plans の該当Planも更新
+        try {
+          const localRaw = localStorage.getItem('pdca_local_plans');
+          if (localRaw) {
+            const list = JSON.parse(localRaw).map((item: any) => {
+              if (item.id === planId) {
+                return {
+                  ...item,
+                  todayRecord: {
+                    id: newRecord.id,
+                    actual_value: actualValue,
+                    is_completed: isCompleted,
+                  },
+                };
+              }
+              return item;
+            });
+            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+          }
+        } catch (e) {
+          console.warn('Local plans cache update error:', e);
+        }
       }
 
-      // ローカルstateを更新
+      // 2. ローカルstateを即座に更新
       setPlans((prev) =>
         prev.map((item) => {
           if (item.id === planId) {
             return {
               ...item,
               todayRecord: {
-                id: item.todayRecord?.id || 'rec-' + Date.now(),
+                id: newRecord.id,
                 actual_value: actualValue,
                 is_completed: isCompleted,
               },
@@ -280,30 +336,67 @@ export default function HomePage() {
         })
       );
 
-      // ローカルストレージも更新
-      if (typeof window !== 'undefined') {
-        const localRaw = localStorage.getItem('pdca_local_plans');
-        if (localRaw) {
-          try {
-            const list = JSON.parse(localRaw).map((item: any) => {
-              if (item.id === planId) {
-                return {
-                  ...item,
-                  todayRecord: {
-                    id: item.todayRecord?.id || 'rec-' + Date.now(),
-                    actual_value: actualValue,
-                    is_completed: isCompleted,
-                  },
-                };
-              }
-              return item;
-            });
-            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
-          } catch {}
+      // 3. Supabaseへの保存（planIdがUUID形式の場合）
+      if (isValidUUID(planId)) {
+        try {
+          let cleanVersionId = isValidUUID(versionId) ? versionId : null;
+          if (!cleanVersionId) {
+            const { data: verRow } = await supabase
+              .from('plan_versions')
+              .select('id')
+              .eq('plan_id', planId)
+              .order('version_number', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            if (verRow?.id) cleanVersionId = verRow.id;
+          }
+
+          const recordPayload: any = {
+            plan_id: planId,
+            user_id: currentUserId,
+            record_date: todayStr,
+            actual_value: actualValue,
+            is_completed: isCompleted,
+            updated_at: new Date().toISOString(),
+          };
+          if (cleanVersionId) {
+            recordPayload.plan_version_id = cleanVersionId;
+          }
+
+          // 既存チェックしてupdateまたはinsertを実行
+          const { data: existingRec } = await supabase
+            .from('do_records')
+            .select('id')
+            .eq('plan_id', planId)
+            .eq('record_date', todayStr)
+            .maybeSingle();
+
+          if (existingRec?.id) {
+            const { error: upErr } = await supabase
+              .from('do_records')
+              .update(recordPayload)
+              .eq('id', existingRec.id);
+            if (upErr) console.warn('Supabase update record error:', upErr);
+          } else {
+            const { error: insErr } = await supabase
+              .from('do_records')
+              .insert(recordPayload);
+            if (insErr) {
+              console.warn('Supabase insert record error, trying update fallback:', insErr);
+              await supabase
+                .from('do_records')
+                .update(recordPayload)
+                .eq('plan_id', planId)
+                .eq('record_date', todayStr);
+            }
+          }
+        } catch (sbErr) {
+          console.warn('Supabase record sync error:', sbErr);
         }
       }
 
-      showToast(isCompleted ? '🎉 達成を記録しました！' : '⚠️ 未達成として実績を登録しました');
+      window.dispatchEvent(new Event('pdca_plans_updated'));
+      showToast(isCompleted ? '🎉 達成を記録しました！' : '実績を登録しました（未達成）');
     } catch (err: any) {
       console.error('Save Do Record Error:', err);
       showToast('実績を保存しました');
@@ -314,16 +407,36 @@ export default function HomePage() {
     try {
       const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
 
-      try {
-        await supabase
-          .from('do_records')
-          .delete()
-          .eq('plan_id', planId)
-          .eq('record_date', todayStr);
-      } catch (err) {
-        console.warn('Supabase reset record warning:', err);
+      // 1. ローカルキャッシュ（pdca_local_records & pdca_local_plans）から削除
+      if (typeof window !== 'undefined') {
+        try {
+          const recRaw = localStorage.getItem('pdca_local_records');
+          if (recRaw) {
+            const recList = JSON.parse(recRaw).filter(
+              (r: any) => !(r.plan_id === planId && r.record_date === todayStr)
+            );
+            localStorage.setItem('pdca_local_records', JSON.stringify(recList));
+          }
+        } catch {}
+
+        try {
+          const localRaw = localStorage.getItem('pdca_local_plans');
+          if (localRaw) {
+            const list = JSON.parse(localRaw).map((item: any) => {
+              if (item.id === planId) {
+                return {
+                  ...item,
+                  todayRecord: null,
+                };
+              }
+              return item;
+            });
+            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+          }
+        } catch {}
       }
 
+      // 2. ローカルstateを更新
       setPlans((prev) =>
         prev.map((item) => {
           if (item.id === planId) {
@@ -336,24 +449,18 @@ export default function HomePage() {
         })
       );
 
-      if (typeof window !== 'undefined') {
-        const localRaw = localStorage.getItem('pdca_local_plans');
-        if (localRaw) {
-          try {
-            const list = JSON.parse(localRaw).map((item: any) => {
-              if (item.id === planId) {
-                return {
-                  ...item,
-                  todayRecord: null,
-                };
-              }
-              return item;
-            });
-            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
-          } catch {}
-        }
+      // 3. Supabaseから削除
+      try {
+        await supabase
+          .from('do_records')
+          .delete()
+          .eq('plan_id', planId)
+          .eq('record_date', todayStr);
+      } catch (err) {
+        console.warn('Supabase reset record warning:', err);
       }
 
+      window.dispatchEvent(new Event('pdca_plans_updated'));
       showToast('本日の記録を取り消し、未入力に戻しました');
     } catch (err: any) {
       console.error('Reset record error:', err);
