@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2 } from 'lucide-react';
+import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2, CheckCircle2, AlertCircle, HelpCircle } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
 import { useLiff } from '@/components/liff-provider';
@@ -303,10 +303,61 @@ export default function HomePage() {
         }
       }
 
-      showToast(isCompleted ? '🎉 達成を記録しました！' : '実績を保存しました');
+      showToast(isCompleted ? '🎉 達成を記録しました！' : '⚠️ 未達成として実績を登録しました');
     } catch (err: any) {
       console.error('Save Do Record Error:', err);
       showToast('実績を保存しました');
+    }
+  };
+
+  const handleResetRecord = async (planId: string) => {
+    try {
+      const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
+
+      try {
+        await supabase
+          .from('do_records')
+          .delete()
+          .eq('plan_id', planId)
+          .eq('record_date', todayStr);
+      } catch (err) {
+        console.warn('Supabase reset record warning:', err);
+      }
+
+      setPlans((prev) =>
+        prev.map((item) => {
+          if (item.id === planId) {
+            return {
+              ...item,
+              todayRecord: null,
+            };
+          }
+          return item;
+        })
+      );
+
+      if (typeof window !== 'undefined') {
+        const localRaw = localStorage.getItem('pdca_local_plans');
+        if (localRaw) {
+          try {
+            const list = JSON.parse(localRaw).map((item: any) => {
+              if (item.id === planId) {
+                return {
+                  ...item,
+                  todayRecord: null,
+                };
+              }
+              return item;
+            });
+            localStorage.setItem('pdca_local_plans', JSON.stringify(list));
+          } catch {}
+        }
+      }
+
+      showToast('本日の記録を取り消し、未入力に戻しました');
+    } catch (err: any) {
+      console.error('Reset record error:', err);
+      showToast('未入力に戻しました');
     }
   };
 
@@ -436,7 +487,9 @@ export default function HomePage() {
     showToast('🗑️ Planを削除しました');
   };
 
-  const completedCount = plans.filter((p) => p.todayRecord?.is_completed).length;
+  const achievedCount = plans.filter((p) => p.todayRecord && p.todayRecord.is_completed).length;
+  const unachievedCount = plans.filter((p) => p.todayRecord && !p.todayRecord.is_completed).length;
+  const unrecordedCount = plans.filter((p) => !p.todayRecord).length;
   const totalCount = plans.length;
 
   return (
@@ -473,17 +526,61 @@ export default function HomePage() {
       </div>
 
       {!loading && totalCount > 0 && (
-        <div className="p-3.5 bg-gradient-to-r from-emerald-500 to-teal-600 rounded-2xl text-white shadow-sm flex items-center justify-between">
-          <div>
-            <p className="text-[11px] font-medium text-emerald-100">本日の進捗状況</p>
-            <p className="text-lg font-bold mt-0.5">
-              {completedCount} / {totalCount} 完了
-            </p>
+        <div className="bg-white border border-gray-200/90 rounded-2xl p-4 shadow-sm space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-gray-700">
+              <Sparkles className="w-4 h-4 text-emerald-600" />
+              <span>本日の実行ステータス</span>
+            </div>
+            <span className="text-[11px] text-gray-500 font-medium">
+              全 {totalCount} 件のPlan
+            </span>
           </div>
-          <div className="flex items-center gap-1.5 bg-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm text-xs font-semibold">
-            <Sparkles className="w-3.5 h-3.5" />
-            {completedCount === totalCount ? 'パーフェクト達成！' : 'あと少し！'}
+
+          <div className="grid grid-cols-3 gap-2">
+            {/* 達成 */}
+            <div className="p-2.5 bg-emerald-50/80 border border-emerald-200 rounded-xl text-center">
+              <div className="text-[11px] font-bold text-emerald-700 flex items-center justify-center gap-1">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                達成
+              </div>
+              <div className="text-xl font-extrabold text-emerald-800 mt-0.5">
+                {achievedCount}
+                <span className="text-xs font-normal text-emerald-600 ml-0.5">件</span>
+              </div>
+            </div>
+
+            {/* 未達成 */}
+            <div className="p-2.5 bg-amber-50/80 border border-amber-200 rounded-xl text-center">
+              <div className="text-[11px] font-bold text-amber-800 flex items-center justify-center gap-1">
+                <AlertCircle className="w-3.5 h-3.5" />
+                未達成
+              </div>
+              <div className="text-xl font-extrabold text-amber-900 mt-0.5">
+                {unachievedCount}
+                <span className="text-xs font-normal text-amber-700 ml-0.5">件</span>
+              </div>
+            </div>
+
+            {/* 未入力 */}
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-center">
+              <div className="text-[11px] font-bold text-slate-600 flex items-center justify-center gap-1">
+                <HelpCircle className="w-3.5 h-3.5" />
+                未入力
+              </div>
+              <div className="text-xl font-extrabold text-slate-800 mt-0.5">
+                {unrecordedCount}
+                <span className="text-xs font-normal text-slate-600 ml-0.5">件</span>
+              </div>
+            </div>
           </div>
+
+          {achievedCount === totalCount && (
+            <div className="text-center py-1.5 px-3 bg-emerald-100/70 text-emerald-800 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              本日すべてのPlanを達成しました！素晴らしいです！
+            </div>
+          )}
         </div>
       )}
 
@@ -535,6 +632,7 @@ export default function HomePage() {
               key={plan.id}
               plan={plan}
               onSaveRecord={handleSaveRecord}
+              onResetRecord={handleResetRecord}
               onEdit={handleOpenEdit}
               onDelete={handleDeletePlan}
             />
