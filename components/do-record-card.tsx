@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import Link from 'next/link';
 import {
   Check,
   Plus,
@@ -25,6 +24,7 @@ export interface PlanWithDetails {
   objectiveTitle: string;
   currentVersion: {
     id: string;
+    version_number?: number;
     action_plan: string;
     target_value: number;
     unit: string;
@@ -34,6 +34,7 @@ export interface PlanWithDetails {
   };
   todayRecord?: {
     id: string;
+    record_date?: string;
     actual_value: number;
     is_completed: boolean;
   } | null;
@@ -177,10 +178,21 @@ export function DoRecordCard({
         </div>
       </div>
 
-      {/* 2行目: アクションプランタイトル */}
-      <h3 className="text-base font-bold text-gray-900 leading-snug mb-1.5">
-        {version.action_plan || plan.title}
-      </h3>
+      {/* 2行目: アクションプランタイトル ＆ バージョンバッジ */}
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+        <span
+          className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-xs flex items-center gap-1 ${
+            version.version_number && version.version_number > 1
+              ? 'bg-emerald-600 text-white'
+              : 'bg-slate-100 text-slate-700 border border-slate-200'
+          }`}
+        >
+          Ver.{version.version_number || 1}
+        </span>
+        <h3 className="text-base font-bold text-gray-900 leading-snug">
+          {version.action_plan || plan.title}
+        </h3>
+      </div>
 
       {/* 3行目: 目標数値 ＆ 操作アイコン群（Check, カレンダー, 編集, 削除をこのラインに配置） */}
       <div className="flex items-center justify-between mb-3 gap-2">
@@ -193,12 +205,6 @@ export function DoRecordCard({
         </p>
 
         <div className="flex items-center gap-1 shrink-0">
-          <Link
-            href={`/plans/${plan.id}/check`}
-            className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-0.5 transition"
-          >
-            Check ➔
-          </Link>
           <button
             type="button"
             onClick={() => setShowCalendarModal(true)}
