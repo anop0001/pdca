@@ -50,7 +50,7 @@ export default function HomePage() {
       // ログイン中のユーザーID（UUID）を特定（LIFFプロファイルまたはSupabaseセッション）
       const currentUserId = await getCurrentUserId(liffUser || undefined);
 
-      // 未同期のローカルPlan（仮ID 'plan-'）があればSupabaseに自動アップロード（端末間同期）
+      // 未同期のローカルPlanがあればSupabaseに自動アップロード（端末間同期・旧セッション救済）
       if (typeof window !== 'undefined' && currentUserId) {
         const localRaw = localStorage.getItem('pdca_local_plans');
         if (localRaw) {
@@ -58,13 +58,35 @@ export default function HomePage() {
             const localList = JSON.parse(localRaw);
             let hasSyncUpdates = false;
 
+            // まずSupabase上の既存プラン一覧を取得
+            const { data: existingUserPlans } = await supabase
+              .from('plans')
+              .select('id, title')
+              .eq('user_id', currentUserId);
+
+            const existingTitles = new Set((existingUserPlans || []).map((p: any) => p.title));
+
             for (const lp of localList) {
-              if (lp.id && String(lp.id).startsWith('plan-')) {
+              const planTitle = lp.title || lp.currentVersion?.action_plan || '実行Plan';
+
+              // すでにSupabase上に同名Planが存在する場合、IDとuserIdを紐付け
+              if (existingTitles.has(planTitle)) {
+                const match = existingUserPlans?.find((p: any) => p.title === planTitle);
+                if (match && lp.id !== match.id) {
+                  lp.id = match.id;
+                  lp.userId = currentUserId;
+                  hasSyncUpdates = true;
+                }
+                continue;
+              }
+
+              // Supabase上にまだ存在しないローカルPlan（仮IDまたは別ユーザーIDで作成されたもの）を現在のLINEユーザーとしてアップロード
+              if (lp.id && (String(lp.id).startsWith('plan-') || !lp.userId || lp.userId !== currentUserId)) {
                 const { data: uploadedPlan } = await supabase
                   .from('plans')
                   .insert({
                     user_id: currentUserId,
-                    title: lp.title || lp.currentVersion?.action_plan || '実行Plan',
+                    title: planTitle,
                     status: 'in_progress',
                   })
                   .select('id')
@@ -77,7 +99,7 @@ export default function HomePage() {
                       plan_id: uploadedPlan.id,
                       user_id: currentUserId,
                       version_number: 1,
-                      action_plan: lp.currentVersion?.action_plan || lp.title || '実行Plan',
+                      action_plan: lp.currentVersion?.action_plan || planTitle,
                       target_value: lp.currentVersion?.target_value || 1,
                       unit: lp.currentVersion?.unit || '回',
                       operator: lp.currentVersion?.operator || 'gte',
@@ -87,6 +109,7 @@ export default function HomePage() {
 
                   lp.id = uploadedPlan.id;
                   lp.userId = currentUserId;
+                  existingTitles.add(planTitle);
                   hasSyncUpdates = true;
                 }
               }
