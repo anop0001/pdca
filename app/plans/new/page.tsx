@@ -26,9 +26,12 @@ export default function NewPlanPage() {
   const methods = useForm<PlanWizardFormData>({
     resolver: zodResolver(planWizardSchema),
     defaultValues: {
-      objectiveMode: 'select',
+      objectiveMode: 'create',
       selectedObjectiveId: '',
       newObjectiveTitle: '',
+      objectiveWhat: '',
+      objectiveWhen: '',
+      objectiveState: '',
       actionPlan: '',
       targetValue: 1,
       unit: '回',
@@ -44,7 +47,14 @@ export default function NewPlanPage() {
   const handleNextStep = async () => {
     let isValid = false;
     if (currentStep === 1) {
-      isValid = await trigger(['objectiveMode', 'selectedObjectiveId', 'newObjectiveTitle']);
+      isValid = await trigger([
+        'objectiveMode',
+        'selectedObjectiveId',
+        'newObjectiveTitle',
+        'objectiveWhat',
+        'objectiveWhen',
+        'objectiveState',
+      ]);
     } else if (currentStep === 2) {
       isValid = await trigger(['actionPlan']);
     }
@@ -66,6 +76,17 @@ export default function NewPlanPage() {
     try {
       // ユーザーIDを取得（LIFFプロファイルまたはSupabaseセッションから特定）
       const currentUserId = (await getCurrentUserId(liffUser || undefined)) || '00000000-0000-0000-0000-000000000001';
+
+      // 目的タイトルの自動生成
+      if (data.objectiveMode === 'create') {
+        const what = data.objectiveWhat?.trim() || '';
+        const when = data.objectiveWhen?.trim() || '';
+        const state = data.objectiveState?.trim() || '';
+        if (what && when && state) {
+          const cleanWhen = when.endsWith('まで') || when.endsWith('までに') ? when : `${when}までに`;
+          data.newObjectiveTitle = `【何を】${what} 【いつまでに】${cleanWhen} 【状態】${state}`;
+        }
+      }
 
       let finalObjectiveId = data.selectedObjectiveId;
       let newPlanId = 'plan-' + Date.now();
