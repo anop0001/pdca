@@ -2,7 +2,21 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Check, Plus, Minus, Target, Flame, CheckCircle2, Loader2, ArrowRight, Pencil, Trash2, Calendar } from 'lucide-react';
+import {
+  Check,
+  Plus,
+  Minus,
+  Target,
+  Flame,
+  CheckCircle2,
+  AlertCircle,
+  HelpCircle,
+  RotateCcw,
+  Loader2,
+  Pencil,
+  Trash2,
+  Calendar,
+} from 'lucide-react';
 import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export interface PlanWithDetails {
@@ -33,11 +47,18 @@ interface DoRecordCardProps {
     actualValue: number,
     isCompleted: boolean
   ) => Promise<void>;
+  onResetRecord?: (planId: string) => Promise<void>;
   onEdit?: (plan: PlanWithDetails) => void;
   onDelete?: (planId: string) => void;
 }
 
-export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordCardProps) {
+export function DoRecordCard({
+  plan,
+  onSaveRecord,
+  onResetRecord,
+  onEdit,
+  onDelete,
+}: DoRecordCardProps) {
   const version = plan.currentVersion;
   const isBinaryType = version.unit === '回' && version.target_value === 1;
 
@@ -54,22 +75,34 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
   }, [plan.todayRecord]);
 
   const checkIfAchieved = (val: number): boolean => {
-    if (isBinaryType) return isCompleted;
+    if (isBinaryType) return val >= 1;
     switch (version.operator) {
-      case 'gte': return val >= version.target_value;
-      case 'lte': return val <= version.target_value && val > 0;
-      case 'eq': return val === version.target_value;
-      default: return false;
+      case 'gte':
+        return val >= version.target_value;
+      case 'lte':
+        return val <= version.target_value && val > 0;
+      case 'eq':
+        return val === version.target_value;
+      default:
+        return false;
     }
   };
 
-  const handleToggleBinary = async () => {
-    const nextCompleted = !isCompleted;
-    const nextVal = nextCompleted ? 1 : 0;
-    setIsCompleted(nextCompleted);
+  // 本日の記録ステータス（達成 / 未達成 / 未入力）
+  const currentStatus: 'achieved' | 'unachieved' | 'unrecorded' =
+    !plan.todayRecord
+      ? 'unrecorded'
+      : plan.todayRecord.is_completed
+      ? 'achieved'
+      : 'unachieved';
+
+  // 回数型(1回)の達成/未達成ワンタップ登録
+  const handleBinaryAction = async (completed: boolean) => {
+    const nextVal = completed ? 1 : 0;
+    setIsCompleted(completed);
     setActualValue(nextVal);
     setIsSaving(true);
-    await onSaveRecord(plan.id, version.id, nextVal, nextCompleted);
+    await onSaveRecord(plan.id, version.id, nextVal, completed);
     setIsSaving(false);
   };
 
@@ -101,26 +134,41 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
     Math.round((actualValue / (version.target_value || 1)) * 100)
   );
 
+  const cardBgClass =
+    currentStatus === 'achieved'
+      ? 'bg-emerald-50/50 border-emerald-300 ring-1 ring-emerald-200 shadow-sm'
+      : currentStatus === 'unachieved'
+      ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200 shadow-sm'
+      : 'bg-white border-gray-200/80 hover:border-gray-300 shadow-sm';
+
   return (
-    <div
-      className={`p-4 rounded-2xl border transition-all duration-300 shadow-sm ${
-        isCompleted
-          ? 'bg-emerald-50/60 border-emerald-300 ring-1 ring-emerald-200'
-          : 'bg-white border-gray-200/80 hover:border-gray-300'
-      }`}
-    >
+    <div className={`p-4 rounded-2xl border transition-all duration-300 ${cardBgClass}`}>
       <div className="flex items-center justify-between mb-2">
         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600">
           <Target className="w-3 h-3 text-emerald-600" />
           {plan.objectiveTitle}
         </span>
         <div className="flex items-center gap-1.5">
-          {isCompleted && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
-              <CheckCircle2 className="w-3 h-3" />
+          {/* 明確なステータスバッジ（達成 / 未達成 / 未入力） */}
+          {currentStatus === 'achieved' && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
               達成
             </span>
           )}
+          {currentStatus === 'unachieved' && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+              <AlertCircle className="w-3 h-3 text-amber-600" />
+              未達成
+            </span>
+          )}
+          {currentStatus === 'unrecorded' && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+              <HelpCircle className="w-3 h-3 text-slate-400" />
+              未入力
+            </span>
+          )}
+
           <Link
             href={`/plans/${plan.id}/check`}
             className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-0.5 transition"
@@ -171,36 +219,69 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
       </p>
 
       {isBinaryType ? (
-        <button
-          type="button"
-          onClick={handleToggleBinary}
-          disabled={isSaving}
-          className={`w-full py-3 px-4 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition active:scale-[0.98] ${
-            isCompleted
-              ? 'bg-emerald-600 text-white shadow-sm'
-              : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-          }`}
-        >
-          {isSaving ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : isCompleted ? (
-            <>
-              <Check className="w-5 h-5 stroke-[3]" />
-              本日の実行を完了しました！
-            </>
-          ) : (
-            <>
-              <span className="w-5 h-5 rounded-md border-2 border-gray-400 inline-block" />
-              タップして本日の完了を記録
-            </>
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => handleBinaryAction(true)}
+              disabled={isSaving}
+              className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] ${
+                currentStatus === 'achieved'
+                  ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400 ring-offset-1'
+                  : 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" />
+                  {currentStatus === 'achieved' ? '達成 (登録済)' : '達成を登録'}
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleBinaryAction(false)}
+              disabled={isSaving}
+              className={`py-2.5 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition active:scale-[0.98] ${
+                currentStatus === 'unachieved'
+                  ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-400 ring-offset-1'
+                  : 'bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100'
+              }`}
+            >
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <AlertCircle className="w-4 h-4" />
+                  {currentStatus === 'unachieved' ? '未達成 (登録済)' : '未達成を登録'}
+                </>
+              )}
+            </button>
+          </div>
+
+          {currentStatus !== 'unrecorded' && onResetRecord && (
+            <div className="text-right pt-0.5">
+              <button
+                type="button"
+                onClick={() => onResetRecord(plan.id)}
+                disabled={isSaving}
+                className="text-[11px] text-gray-400 hover:text-gray-600 underline transition inline-flex items-center gap-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                本日の記録を取消して未入力に戻す
+              </button>
+            </div>
           )}
-        </button>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
             <div
               className={`h-full transition-all duration-300 ${
-                isCompleted ? 'bg-emerald-500' : 'bg-emerald-400'
+                isCompleted ? 'bg-emerald-500' : 'bg-amber-500'
               }`}
               style={{ width: `${progressPercent}%` }}
             />
@@ -212,6 +293,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
               onClick={() => handleStepValue(-1)}
               disabled={actualValue <= 0 || isSaving}
               className="w-11 h-11 flex items-center justify-center rounded-xl bg-gray-100 active:bg-gray-200 text-gray-700 disabled:opacity-30 transition shrink-0"
+              aria-label="減らす"
             >
               <Minus className="w-5 h-5" />
             </button>
@@ -220,7 +302,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
               <input
                 type="number"
                 inputMode="decimal"
-                value={actualValue === 0 && !hasChanged ? '' : actualValue}
+                value={actualValue === 0 && !hasChanged && currentStatus === 'unrecorded' ? '' : actualValue}
                 placeholder="0"
                 onChange={handleInputChange}
                 className="w-full h-11 px-3 pr-10 text-center font-bold text-lg rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none"
@@ -235,6 +317,7 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
               onClick={() => handleStepValue(1)}
               disabled={isSaving}
               className="w-11 h-11 flex items-center justify-center rounded-xl bg-gray-100 active:bg-gray-200 text-gray-700 transition shrink-0"
+              aria-label="増やす"
             >
               <Plus className="w-5 h-5" />
             </button>
@@ -242,19 +325,74 @@ export function DoRecordCard({ plan, onSaveRecord, onEdit, onDelete }: DoRecordC
             <button
               type="button"
               onClick={handleSaveNumeric}
-              disabled={isSaving || !hasChanged}
-              className={`h-11 px-3.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition active:scale-[0.98] ${
-                hasChanged
-                  ? 'bg-emerald-600 text-white shadow-sm'
+              disabled={isSaving || (!hasChanged && currentStatus !== 'unrecorded')}
+              className={`h-11 px-3.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition active:scale-[0.98] shrink-0 ${
+                isSaving
+                  ? 'bg-gray-200 text-gray-500'
+                  : hasChanged || currentStatus === 'unrecorded'
+                  ? isCompleted
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
+                    : 'bg-amber-600 hover:bg-amber-700 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-400 border border-transparent'
               }`}
             >
               {isSaving ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
+              ) : hasChanged || currentStatus === 'unrecorded' ? (
+                isCompleted ? '達成で登録' : '未達で登録'
               ) : (
-                '保存'
+                '登録済'
               )}
             </button>
+          </div>
+
+          {/* 判定区分切り替えと未入力リセット */}
+          <div className="flex items-center justify-between text-xs pt-0.5">
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-gray-400 font-medium">判定区分:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCompleted(true);
+                  setHasChanged(true);
+                }}
+                className={`px-2 py-0.5 rounded-md font-bold text-[11px] transition flex items-center gap-1 ${
+                  isCompleted
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                <CheckCircle2 className="w-3 h-3" />
+                達成
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCompleted(false);
+                  setHasChanged(true);
+                }}
+                className={`px-2 py-0.5 rounded-md font-bold text-[11px] transition flex items-center gap-1 ${
+                  !isCompleted
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+                }`}
+              >
+                <AlertCircle className="w-3 h-3" />
+                未達成
+              </button>
+            </div>
+
+            {currentStatus !== 'unrecorded' && onResetRecord && (
+              <button
+                type="button"
+                onClick={() => onResetRecord(plan.id)}
+                disabled={isSaving}
+                className="text-[11px] text-gray-400 hover:text-gray-600 underline transition inline-flex items-center gap-1"
+              >
+                <RotateCcw className="w-3 h-3" />
+                未入力に戻す
+              </button>
+            )}
           </div>
         </div>
       )}
