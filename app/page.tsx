@@ -50,6 +50,57 @@ export default function HomePage() {
       // ログイン中のユーザーID（UUID）を特定（LIFFプロファイルまたはSupabaseセッション）
       const currentUserId = await getCurrentUserId(liffUser || undefined);
 
+      // 未同期のローカルPlan（仮ID 'plan-'）があればSupabaseに自動アップロード（端末間同期）
+      if (typeof window !== 'undefined' && currentUserId) {
+        const localRaw = localStorage.getItem('pdca_local_plans');
+        if (localRaw) {
+          try {
+            const localList = JSON.parse(localRaw);
+            let hasSyncUpdates = false;
+
+            for (const lp of localList) {
+              if (lp.id && String(lp.id).startsWith('plan-')) {
+                const { data: uploadedPlan } = await supabase
+                  .from('plans')
+                  .insert({
+                    user_id: currentUserId,
+                    title: lp.title || lp.currentVersion?.action_plan || '実行Plan',
+                    status: 'in_progress',
+                  })
+                  .select('id')
+                  .maybeSingle();
+
+                if (uploadedPlan?.id) {
+                  await supabase
+                    .from('plan_versions')
+                    .insert({
+                      plan_id: uploadedPlan.id,
+                      user_id: currentUserId,
+                      version_number: 1,
+                      action_plan: lp.currentVersion?.action_plan || lp.title || '実行Plan',
+                      target_value: lp.currentVersion?.target_value || 1,
+                      unit: lp.currentVersion?.unit || '回',
+                      operator: lp.currentVersion?.operator || 'gte',
+                      frequency: lp.currentVersion?.frequency || 'daily',
+                      deadline: lp.currentVersion?.deadline || '',
+                    });
+
+                  lp.id = uploadedPlan.id;
+                  lp.userId = currentUserId;
+                  hasSyncUpdates = true;
+                }
+              }
+            }
+
+            if (hasSyncUpdates) {
+              localStorage.setItem('pdca_local_plans', JSON.stringify(localList));
+            }
+          } catch (syncErr) {
+            console.warn('Local plans cloud sync warning:', syncErr);
+          }
+        }
+      }
+
       // セキュリティ保護：ユーザーIDが特定できない場合は他人のPlanを絶対に取得・表示しない
       let formattedPlans: PlanWithDetails[] = [];
 
@@ -134,6 +185,9 @@ export default function HomePage() {
               }
             }
           } catch {}
+        }
+        if (formattedPlans.length > 0) {
+          localStorage.setItem('pdca_local_plans', JSON.stringify(formattedPlans));
         }
       }
 

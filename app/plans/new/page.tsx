@@ -73,7 +73,7 @@ export default function NewPlanPage() {
       // 1. Supabaseへの保存を試みる
       try {
         if (data.objectiveMode === 'create' && data.newObjectiveTitle?.trim()) {
-          const { data: newObj } = await supabase
+          const { data: newObj, error: objErr } = await supabase
             .from('objectives')
             .insert({
               user_id: currentUserId,
@@ -83,12 +83,15 @@ export default function NewPlanPage() {
             .select('id')
             .maybeSingle();
 
+          if (objErr) {
+            console.warn('Objective insert warning:', objErr);
+          }
           if (newObj?.id) {
             finalObjectiveId = newObj.id;
           }
         }
 
-        const { data: newPlan } = await supabase
+        const { data: newPlan, error: planErr } = await supabase
           .from('plans')
           .insert({
             objective_id: finalObjectiveId || null,
@@ -99,9 +102,13 @@ export default function NewPlanPage() {
           .select('id')
           .maybeSingle();
 
+        if (planErr) {
+          console.warn('Plan insert warning:', planErr);
+        }
+
         if (newPlan?.id) {
           newPlanId = newPlan.id;
-          await supabase
+          const { error: verErr } = await supabase
             .from('plan_versions')
             .insert({
               plan_id: newPlan.id,
@@ -114,6 +121,10 @@ export default function NewPlanPage() {
               frequency: data.frequency === 'weekday' ? 'custom' : data.frequency,
               deadline: data.deadline,
             });
+
+          if (verErr) {
+            console.warn('Plan version insert warning:', verErr);
+          }
         }
       } catch (sbErr) {
         console.warn('Supabase save warning (fallback to local):', sbErr);

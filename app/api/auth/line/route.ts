@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase/admin';
+import { getLineAuthCredentials } from '@/lib/supabase/auth';
 
 export async function POST(request: Request) {
   try {
@@ -33,8 +34,7 @@ export async function POST(request: Request) {
     const verifyData = await verifyRes.json();
     const lineUserId = verifyData.sub;
 
-    const authEmail = `${lineUserId}@line.app.internal`;
-    const tempPassword = `line_user_secret_${lineUserId}_${process.env.SUPABASE_AUTH_SECRET || 'pdca'}`;
+    const { email: authEmail, password: tempPassword } = getLineAuthCredentials(lineUserId);
 
     const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
     let authUser = existingUsers?.users.find((u) => u.email === authEmail);

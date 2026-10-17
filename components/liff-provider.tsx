@@ -82,6 +82,11 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
         };
         setUser(currentUser);
 
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('pdca_line_user_id', profile.userId);
+          localStorage.setItem('pdca_user_name', profile.displayName);
+        }
+
         // 1. LINE IDトークンによるSupabase認証セッション連携を試行
         let sessionEstablished = false;
         const idToken = liff.getIDToken();
@@ -112,12 +117,14 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // 2. もしトークン連携が未確立の場合は、直接Supabaseセッションを自動・強制ログイン
-        if (!sessionEstablished) {
-          await ensureSupabaseSession(currentUser);
-        }
+        // 2. セッションがLINEユーザーと完全一致しているか確認・確立
+        await ensureSupabaseSession(currentUser);
 
         setIsReady(true);
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new Event('pdca_plans_updated'));
+          window.dispatchEvent(new Event('pdca_tasks_updated'));
+        }
       } catch (err: any) {
         console.error('LIFF Init Error:', err);
         setLiffError(err.message || 'LIFF初期化に失敗しました');
