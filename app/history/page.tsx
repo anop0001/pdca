@@ -420,6 +420,64 @@ export default function HistoryPage() {
         }
       }
 
+      // 5.5. ローカルストレージ（pdca_local_records & pdca_local_plans）の実績レコードを全Planのdo_recordsに合体反映
+      const localRecordsMap = new Map<string, any[]>();
+      if (typeof window !== 'undefined') {
+        try {
+          const recRaw = localStorage.getItem('pdca_local_records');
+          if (recRaw) {
+            const list = JSON.parse(recRaw);
+            for (const r of list) {
+              if (r.plan_id) {
+                if (!localRecordsMap.has(r.plan_id)) localRecordsMap.set(r.plan_id, []);
+                localRecordsMap.get(r.plan_id)!.push(r);
+              }
+            }
+          }
+        } catch {}
+
+        try {
+          const plansRaw = localStorage.getItem('pdca_local_plans');
+          if (plansRaw) {
+            const pList = JSON.parse(plansRaw);
+            for (const lp of pList) {
+              if (lp.id && lp.todayRecord) {
+                if (!localRecordsMap.has(lp.id)) localRecordsMap.set(lp.id, []);
+                const existing = localRecordsMap.get(lp.id)!;
+                if (!existing.some((r) => r.record_date === getTodayJSTString())) {
+                  existing.push({
+                    id: lp.todayRecord.id || 'rec-today',
+                    plan_id: lp.id,
+                    record_date: getTodayJSTString(),
+                    actual_value: lp.todayRecord.actual_value,
+                    is_completed: lp.todayRecord.is_completed,
+                  });
+                }
+              }
+            }
+          }
+        } catch {}
+      }
+
+      for (const [pId, p] of Array.from(fetchedPlansMap.entries())) {
+        const localRecs = localRecordsMap.get(pId) || [];
+        if (!p.do_records) p.do_records = [];
+        const existingDates = new Set((p.do_records || []).map((r: any) => r.record_date));
+
+        for (const lr of localRecs) {
+          if (!existingDates.has(lr.record_date)) {
+            p.do_records.push(lr);
+            existingDates.add(lr.record_date);
+          } else {
+            // 同日のレコードが存在する場合、最新のローカル入力値で上書き反映
+            const idx = p.do_records.findIndex((r: any) => r.record_date === lr.record_date);
+            if (idx >= 0 && lr.actual_value !== undefined) {
+              p.do_records[idx] = { ...p.do_records[idx], ...lr };
+            }
+          }
+        }
+      }
+
       // 6. すべてのPlanを目標（Objective）ごとにグループ化
       const groupsMap = new Map<string, ObjectiveGroup>();
 
@@ -461,6 +519,10 @@ export default function HistoryPage() {
   useEffect(() => {
     if (!isReady) return;
     fetchHistoryData();
+    window.addEventListener('pdca_plans_updated', fetchHistoryData);
+    return () => {
+      window.removeEventListener('pdca_plans_updated', fetchHistoryData);
+    };
   }, [isReady, fetchHistoryData]);
 
   const filteredObjectives = useMemo(() => {
