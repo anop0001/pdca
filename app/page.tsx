@@ -179,7 +179,8 @@ export default function HomePage() {
               if (plansRaw) {
                 const pList = JSON.parse(plansRaw);
                 for (const lp of pList) {
-                  if (lp.id && lp.todayRecord && !localTodayRecordsMap.has(lp.id)) {
+                  // 当日のレコードのみをローカルキャッシュとして採用
+                  if (lp.id && lp.todayRecord && lp.todayRecord.record_date === todayStr && !localTodayRecordsMap.has(lp.id)) {
                     localTodayRecordsMap.set(lp.id, lp.todayRecord);
                   }
                 }
@@ -189,10 +190,11 @@ export default function HomePage() {
 
           formattedPlans = plansData.map((p: any) => {
             const sortedVersions = (p.plan_versions || []).sort(
-              (a: any, b: any) => b.version_number - a.version_number
+              (a: any, b: any) => (b.version_number || 0) - (a.version_number || 0)
             );
             const currentVersion = sortedVersions[0] || {
               id: '',
+              version_number: 1,
               action_plan: p.title,
               target_value: 1,
               unit: '回',
@@ -201,19 +203,34 @@ export default function HomePage() {
               deadline: '',
             };
 
+            // 当日(todayStr)かつ現在のバージョン(currentVersion.id)に紐づくレコードのみを抽出
+            // （過去バージョンVer.1の実績がVer.2に漏れ出さないようにする）
             const sbTodayRecord = (p.do_records || []).find(
-              (r: any) => r.record_date === todayStr
+              (r: any) => r.record_date === todayStr && (!r.plan_version_id || r.plan_version_id === currentVersion.id)
             );
             const localRec = localTodayRecordsMap.get(p.id);
 
-            // Supabaseレコードを優先、無ければローカルキャッシュを採用
-            const todayRecord = sbTodayRecord || localRec || null;
+            let todayRecord = sbTodayRecord || null;
+            if (!todayRecord && localRec) {
+              if (localRec.record_date === todayStr && (!localRec.plan_version_id || localRec.plan_version_id === currentVersion.id)) {
+                todayRecord = localRec;
+              }
+            }
 
             return {
               id: p.id,
               title: p.title,
               objectiveTitle: p.objectives?.title || '目的未設定',
-              currentVersion,
+              currentVersion: {
+                id: currentVersion.id,
+                version_number: currentVersion.version_number || 1,
+                action_plan: currentVersion.action_plan || p.title,
+                target_value: currentVersion.target_value,
+                unit: currentVersion.unit,
+                operator: currentVersion.operator,
+                frequency: currentVersion.frequency,
+                deadline: currentVersion.deadline,
+              },
               todayRecord,
             };
           });
@@ -230,6 +247,10 @@ export default function HomePage() {
             for (const lp of localList) {
               if (lp.userId && currentUserId && lp.userId !== currentUserId) {
                 continue;
+              }
+              // 翌日以降になった過去日のtodayRecordはクリアして未入力にリセット
+              if (lp.todayRecord && lp.todayRecord.record_date !== todayStr) {
+                lp.todayRecord = null;
               }
               if (!allPlans.some((p) => p.id === lp.id)) {
                 allPlans.push(lp);
@@ -257,6 +278,18 @@ export default function HomePage() {
       window.removeEventListener('pdca_plans_updated', fetchDashboardData);
     };
   }, [isReady, fetchDashboardData]);
+
+  // ActionでVer.UP（新バージョン作成）された直後のトースト案内
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const newVer = params.get('new_version');
+      if (newVer) {
+        showToast(`🎉 Ver.${newVer} の新しい目標カードを作成しました！`);
+        window.history.replaceState({}, '', '/');
+      }
+    }
+  }, []);
 
   const handleSaveRecord = async (
     planId: string,
@@ -305,6 +338,8 @@ export default function HomePage() {
                   ...item,
                   todayRecord: {
                     id: newRecord.id,
+                    record_date: todayStr,
+                    plan_version_id: versionId,
                     actual_value: actualValue,
                     is_completed: isCompleted,
                   },
@@ -327,6 +362,8 @@ export default function HomePage() {
               ...item,
               todayRecord: {
                 id: newRecord.id,
+                record_date: todayStr,
+                plan_version_id: versionId,
                 actual_value: actualValue,
                 is_completed: isCompleted,
               },
