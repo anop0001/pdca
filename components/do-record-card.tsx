@@ -60,7 +60,7 @@ export function DoRecordCard({
   onDelete,
 }: DoRecordCardProps) {
   const version = plan.currentVersion;
-  const isBinaryType = version.unit === '回' && version.target_value === 1;
+  const isBinaryType = version.unit === '回' && Number(version.target_value) === 1;
 
   const [actualValue, setActualValue] = useState<number>(plan.todayRecord?.actual_value ?? 0);
   const [isCompleted, setIsCompleted] = useState<boolean>(plan.todayRecord?.is_completed ?? false);
@@ -75,14 +75,15 @@ export function DoRecordCard({
   }, [plan.todayRecord]);
 
   const checkIfAchieved = (val: number): boolean => {
+    const target = Number(version.target_value) || 0;
     if (isBinaryType) return val >= 1;
     switch (version.operator) {
       case 'gte':
-        return val >= version.target_value;
+        return val >= target;
       case 'lte':
-        return val <= version.target_value && val > 0;
+        return val <= target && val > 0;
       case 'eq':
-        return val === version.target_value;
+        return val === target;
       default:
         return false;
     }
@@ -129,9 +130,10 @@ export function DoRecordCard({
     setHasChanged(false);
   };
 
+  const targetVal = Number(version.target_value) || 1;
   const progressPercent = Math.min(
     100,
-    Math.round((actualValue / (version.target_value || 1)) * 100)
+    Math.round((actualValue / targetVal) * 100)
   );
 
   const cardBgClass =
@@ -143,32 +145,54 @@ export function DoRecordCard({
 
   return (
     <div className={`p-4 rounded-2xl border transition-all duration-300 ${cardBgClass}`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600">
-          <Target className="w-3 h-3 text-emerald-600" />
-          {plan.objectiveTitle}
+      {/* 1行目: 目標タグ ＆ 達成ステータスバッジ */}
+      <div className="flex items-center justify-between mb-2 gap-2">
+        <span
+          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 max-w-[70%] truncate"
+          title={plan.objectiveTitle}
+        >
+          <Target className="w-3 h-3 text-emerald-600 shrink-0" />
+          <span className="truncate">{plan.objectiveTitle}</span>
         </span>
-        <div className="flex items-center gap-1.5">
-          {/* 明確なステータスバッジ（達成 / 未達成 / 未入力） */}
+
+        <div className="flex items-center gap-1.5 shrink-0">
           {currentStatus === 'achieved' && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-full">
               <CheckCircle2 className="w-3 h-3 text-emerald-600" />
               達成
             </span>
           )}
           {currentStatus === 'unachieved' && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2.5 py-0.5 rounded-full">
               <AlertCircle className="w-3 h-3 text-amber-600" />
               未達成
             </span>
           )}
           {currentStatus === 'unrecorded' && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-full">
               <HelpCircle className="w-3 h-3 text-slate-400" />
               未入力
             </span>
           )}
+        </div>
+      </div>
 
+      {/* 2行目: アクションプランタイトル */}
+      <h3 className="text-base font-bold text-gray-900 leading-snug mb-1.5">
+        {version.action_plan || plan.title}
+      </h3>
+
+      {/* 3行目: 目標数値 ＆ 操作アイコン群（Check, カレンダー, 編集, 削除をこのラインに配置） */}
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <p className="text-xs text-gray-500 flex items-center gap-1 min-w-0">
+          <Flame className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+          <span className="truncate">
+            目標: 毎日 {version.target_value} {version.unit}
+            {version.operator === 'gte' ? ' 以上' : version.operator === 'lte' ? ' 以下' : ' 一致'}
+          </span>
+        </p>
+
+        <div className="flex items-center gap-1 shrink-0">
           <Link
             href={`/plans/${plan.id}/check`}
             className="text-[11px] font-bold text-emerald-600 hover:text-emerald-700 px-2 py-0.5 rounded-lg bg-emerald-50 border border-emerald-200 flex items-center gap-0.5 transition"
@@ -209,15 +233,6 @@ export function DoRecordCard({
         </div>
       </div>
 
-      <h3 className="text-base font-bold text-gray-900 leading-snug mb-1">
-        {version.action_plan || plan.title}
-      </h3>
-      <p className="text-xs text-gray-500 mb-3 flex items-center gap-1">
-        <Flame className="w-3 h-3 text-orange-500" />
-        目標: 毎日 {version.target_value} {version.unit}
-        {version.operator === 'gte' ? ' 以上' : version.operator === 'lte' ? ' 以下' : ' 一致'}
-      </p>
-
       {isBinaryType ? (
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
@@ -236,7 +251,7 @@ export function DoRecordCard({
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4" />
-                  {currentStatus === 'achieved' ? '達成 (登録済)' : '達成を登録'}
+                  {currentStatus === 'achieved' ? '達成 (登録済)' : '達成'}
                 </>
               )}
             </button>
@@ -256,7 +271,7 @@ export function DoRecordCard({
               ) : (
                 <>
                   <AlertCircle className="w-4 h-4" />
-                  {currentStatus === 'unachieved' ? '未達成 (登録済)' : '未達成を登録'}
+                  {currentStatus === 'unachieved' ? '未達成 (登録済)' : '未達成'}
                 </>
               )}
             </button>
@@ -280,9 +295,7 @@ export function DoRecordCard({
         <div className="space-y-2.5">
           <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
             <div
-              className={`h-full transition-all duration-300 ${
-                isCompleted ? 'bg-emerald-500' : 'bg-amber-500'
-              }`}
+              className="h-full transition-all duration-300 bg-emerald-500"
               style={{ width: `${progressPercent}%` }}
             />
           </div>
@@ -322,24 +335,23 @@ export function DoRecordCard({
               <Plus className="w-5 h-5" />
             </button>
 
+            {/* 登録ボタン: 「未達」「達成」を入れず「登録」のみ表示 */}
             <button
               type="button"
               onClick={handleSaveNumeric}
               disabled={isSaving || (!hasChanged && currentStatus !== 'unrecorded')}
-              className={`h-11 px-3.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition active:scale-[0.98] shrink-0 ${
+              className={`h-11 px-5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition active:scale-[0.98] shrink-0 ${
                 isSaving
                   ? 'bg-gray-200 text-gray-500'
                   : hasChanged || currentStatus === 'unrecorded'
-                  ? isCompleted
-                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
-                    : 'bg-amber-600 hover:bg-amber-700 text-white shadow-sm'
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
                   : 'bg-gray-100 text-gray-400 border border-transparent'
               }`}
             >
               {isSaving ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : hasChanged || currentStatus === 'unrecorded' ? (
-                isCompleted ? '達成で登録' : '未達で登録'
+                '登録'
               ) : (
                 '登録済'
               )}
