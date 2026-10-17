@@ -4,6 +4,8 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { BookOpen } from 'lucide-react';
+import { supabase } from '@/lib/supabase/client';
+import { getCurrentUserId } from '@/lib/supabase/auth';
 
 export function TopHeader() {
   const pathname = usePathname();
@@ -14,18 +16,108 @@ export function TopHeader() {
   useEffect(() => {
     function updateBadge() {
       try {
+        const cachedTeam = localStorage.getItem('pdca_team_info');
+        if (!cachedTeam) {
+          setPendingCount(0);
+          return;
+        }
+        const parsedTeam = JSON.parse(cachedTeam);
+        if (!parsedTeam?.name) {
+          setPendingCount(0);
+          return;
+        }
+
         const cachedTasks = localStorage.getItem('pdca_team_tasks');
         if (cachedTasks) {
           const list = JSON.parse(cachedTasks);
-          const pending = list.filter((t: any) => t.status === 'check_pending').length;
-          setPendingCount(pending);
-          return;
+          if (Array.isArray(list)) {
+            const pending = list.filter((t: any) => t.status === 'check_pending').length;
+            setPendingCount(pending);
+            return;
+          }
         }
       } catch {}
       setPendingCount(0);
     }
 
+    async function syncBadgeWithSupabase() {
+      try {
+        const currentUserId = await getCurrentUserId();
+        if (!currentUserId) return;
+
+        // 管理者として所属している組織を特定
+        const { data: userMemberships } = await supabase
+          .from('memberships')
+          .select('organization_id')
+          .eq('user_id', currentUserId)
+          .eq('role', 'admin');
+
+        if (!userMemberships || userMemberships.length === 0) {
+          setPendingCount(0);
+          localStorage.removeItem('pdca_team_tasks');
+          return;
+        }
+
+        const orgIds = userMemberships.map((m: any) => m.organization_id);
+
+        // 管理組織の配下メンバー（自身以外・管理者以外）を取得
+        const { data: memberRows } = await supabase
+          .from('memberships')
+          .select('id, user_id, organization_id')
+          .in('organization_id', orgIds)
+          .neq('user_id', currentUserId)
+          .neq('role', 'admin');
+
+        if (!memberRows || memberRows.length === 0) {
+          setPendingCount(0);
+          localStorage.setItem('pdca_team_tasks', '[]');
+          return;
+        }
+
+        const memberUserIds = memberRows.map((m: any) => m.user_id).filter(Boolean);
+        if (memberUserIds.length === 0) {
+          setPendingCount(0);
+          localStorage.setItem('pdca_team_tasks', '[]');
+          return;
+        }
+
+        // 配下メンバーの進行中プランを取得
+        const { data: memberPlans } = await supabase
+          .from('plans')
+          .select(`
+            id,
+            user_id,
+            status,
+            do_records (id, is_completed),
+            reviews (id, status, created_at)
+          `)
+          .in('user_id', memberUserIds)
+          .eq('status', 'in_progress');
+
+        if (!memberPlans || memberPlans.length === 0) {
+          setPendingCount(0);
+          return;
+        }
+
+        let pending = 0;
+        for (const plan of memberPlans) {
+          const isDone = plan.do_records?.[0]?.is_completed;
+          const latestReview = (plan.reviews || []).sort(
+            (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )[0];
+          if (!isDone && latestReview?.status !== 'confirmed' && latestReview?.status !== 'revision_requested') {
+            pending++;
+          }
+        }
+        setPendingCount(pending);
+      } catch (err) {
+        // オフライン時はlocalStorageの値を維持
+      }
+    }
+
     updateBadge();
+    syncBadgeWithSupabase();
+
     window.addEventListener('storage', updateBadge);
     window.addEventListener('pdca_tasks_updated', updateBadge);
     return () => {
