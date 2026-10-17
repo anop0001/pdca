@@ -172,6 +172,9 @@ export default function PlanCheckPage() {
     }
   }
 
+  const checkStatus: 'achieved' | 'unachieved' | 'unrecorded' =
+    recordedDays === 0 ? 'unrecorded' : isAchieved ? 'achieved' : 'unachieved';
+
   const handleConfirmAction = async (
     actionType: ActionType,
     revisionData?: {
@@ -190,6 +193,10 @@ export default function PlanCheckPage() {
       const authId = await getCurrentUserId();
       const userId = authId || '00000000-0000-0000-0000-000000000001';
 
+      const formattedActualSummary = recordedDays === 0
+        ? `未記録 (記録 0/${totalPeriodDays}日・判定データなし)`
+        : `実績平均: ${averageValue}${currentVersion.unit} (記録 ${recordedDays}/${totalPeriodDays}日)`;
+
       const { data: checkRecord } = await supabase
         .from('checks')
         .insert({
@@ -199,7 +206,7 @@ export default function PlanCheckPage() {
           evaluation_date: new Date().toISOString().split('T')[0],
           is_achieved: isAchieved,
           target_summary: `目標: 毎日 ${currentVersion.target_value}${currentVersion.unit}`,
-          actual_summary: `実績平均: ${averageValue}${currentVersion.unit} (記録 ${recordedDays}/${totalPeriodDays}日)`,
+          actual_summary: formattedActualSummary,
         })
         .select('id')
         .single();
@@ -291,6 +298,7 @@ export default function PlanCheckPage() {
           achievedDaysCount,
         }}
         isAchieved={isAchieved}
+        checkStatus={checkStatus}
       />
 
       <hr className="border-gray-100" />
@@ -307,6 +315,12 @@ export default function PlanCheckPage() {
         }}
         onConfirmAction={handleConfirmAction}
         isSubmitting={isSubmitting}
+        checkStatus={checkStatus}
+        actualStats={{
+          recordedDays,
+          totalDays: totalPeriodDays,
+          averageValue,
+        }}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { RotateCw, Wrench, Compass, CheckCircle2, ChevronRight, X, Loader2, Calendar } from 'lucide-react';
+import { RotateCw, Wrench, Compass, CheckCircle2, ChevronRight, X, Loader2, Calendar, AlertTriangle, Sparkles, ExternalLink } from 'lucide-react';
 import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export type ActionType = 'continue' | 'revise' | 'alternative' | 'terminate';
@@ -28,12 +28,20 @@ interface ActionSelectorProps {
     }
   ) => Promise<void>;
   isSubmitting: boolean;
+  checkStatus?: 'achieved' | 'unachieved' | 'unrecorded';
+  actualStats?: {
+    recordedDays: number;
+    totalDays: number;
+    averageValue: number;
+  };
 }
 
 export function ActionSelector({
   currentCriteria,
   onConfirmAction,
   isSubmitting,
+  checkStatus,
+  actualStats,
 }: ActionSelectorProps) {
   const [selectedAction, setSelectedAction] = useState<ActionType>('continue');
   const [showReviseModal, setShowReviseModal] = useState(false);
@@ -49,12 +57,16 @@ export function ActionSelector({
     .split('T')[0];
   const [revDeadline, setRevDeadline] = useState(defaultNextDeadline);
 
+  const isUnrecorded = checkStatus === 'unrecorded' || actualStats?.recordedDays === 0;
+
   const ACTION_OPTIONS = [
     {
       type: 'continue' as ActionType,
       title: '継続する',
-      badge: '同じ条件で継続',
-      desc: '効果が出ている、またはもう少し検証を続けるため、このまま次の期間へ進みます。',
+      badge: isUnrecorded ? '習慣化を優先' : '同じ条件で継続',
+      desc: isUnrecorded
+        ? '前回の目標・条件を変えずに再挑戦し、まずは日々の記録をつける習慣を作ります（おすすめ）。'
+        : '効果が出ている、またはもう少し検証を続けるため、このまま次の期間へ進みます。',
       icon: RotateCw,
       color: 'border-blue-200 hover:border-blue-400 bg-blue-50/40 text-blue-900',
       activeColor: 'border-blue-500 bg-blue-50 ring-2 ring-blue-400',
@@ -63,7 +75,9 @@ export function ActionSelector({
       type: 'revise' as ActionType,
       title: '修正する (Ver.UP)',
       badge: `Ver.${currentCriteria.versionNumber + 1} へ改訂`,
-      desc: '目標値が高すぎた・行動が合わなかったため、実行内容や数値を現実的に見直します。',
+      desc: isUnrecorded
+        ? '記録しにくかった、または目標設定が生活に合わなかったため、行動内容や期日を見直します。'
+        : '目標値が高すぎた・行動が合わなかったため、実行内容や数値を現実的に見直します。',
       icon: Wrench,
       color: 'border-emerald-200 hover:border-emerald-400 bg-emerald-50/40 text-emerald-900',
       activeColor: 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-400',
@@ -201,6 +215,36 @@ export function ActionSelector({
               />
             </div>
 
+            {/* 前回の実績とズレの診断アラート */}
+            {isUnrecorded ? (
+              <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs space-y-1">
+                <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>想定と実績のズレ：未記録（記録0日）</span>
+                </div>
+                <p className="text-[11px] text-amber-700 leading-relaxed">
+                  前Ver.は実績の記録がありませんでした。目標数値を引き上げる前に、まずは「同じ数値で記録をつける習慣化」や「リマインド通知」の活用を検討してください。
+                </p>
+              </div>
+            ) : revTargetValue > currentCriteria.targetValue && checkStatus === 'unachieved' ? (
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs space-y-1 animate-in fade-in">
+                <div className="flex items-center gap-1.5 font-bold text-blue-900">
+                  <Sparkles className="w-4 h-4 text-blue-600 shrink-0" />
+                  <span>💡 改善アドバイス（目標引き上げの確認）</span>
+                </div>
+                <p className="text-[11px] text-blue-800 leading-relaxed">
+                  前回未達成の状態で目標数値（{currentCriteria.targetValue} → {revTargetValue}{revUnit}）を引き上げようとしています。PDCAでは、まずは前回の想定と実績のズレを埋め、達成体験を積んでから数値を上げるのが継続のコツです。
+                </p>
+              </div>
+            ) : revTargetValue < currentCriteria.targetValue && checkStatus === 'unachieved' ? (
+              <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-start gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                <span className="text-[11px]">
+                  現実的な数値に調整し、まずは確実に達成できるリズムを作りましょう！
+                </span>
+              </div>
+            ) : null}
+
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs font-semibold text-gray-700 block mb-1">目標数値</label>
@@ -222,6 +266,15 @@ export function ActionSelector({
               </div>
             </div>
 
+            {revTargetValue > currentCriteria.targetValue && isUnrecorded && (
+              <div className="p-2.5 bg-amber-50 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start gap-1.5 animate-in fade-in">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span className="text-[11px] leading-relaxed">
+                  未記録の状態で目標数値を引き上げています（{currentCriteria.targetValue} → {revTargetValue}{revUnit}）。まずは前Ver.と同じ数値で記録を継続するか、ハードルを下げることをおすすめします。
+                </span>
+              </div>
+            )}
+
             <div className="space-y-1">
               <label className="text-xs font-semibold text-gray-700 block">次の評価期限</label>
               <input
@@ -232,6 +285,31 @@ export function ActionSelector({
               />
             </div>
 
+            {/* カレンダー予定の注意案内 */}
+            <div className="p-3 bg-amber-50 border border-amber-200/90 rounded-2xl text-xs space-y-1.5 shadow-xs">
+              <div className="flex items-center gap-1.5 font-bold text-amber-900">
+                <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Googleカレンダーの予定についてのご案内</span>
+              </div>
+              <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+                このPlanにはカレンダー登録用の予定があります。以前の予定を確認し、必要に応じて変更してください。
+              </p>
+              <div className="flex items-center justify-between pt-0.5">
+                <span className="text-[10px] text-amber-700/80">
+                  ※Ver.{currentCriteria.versionNumber}の予定は自動更新されません
+                </span>
+                <a
+                  href="https://calendar.google.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-emerald-900 underline"
+                >
+                  <span>Googleカレンダーを開く</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
+            </div>
+
             {/* カレンダー連携（完全無料通知） */}
             <button
               type="button"
@@ -239,7 +317,7 @@ export function ActionSelector({
               className="w-full py-2.5 px-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-98 transition shadow-xs"
             >
               <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-              <span>この期日をスマホカレンダーに登録</span>
+              <span>新Ver.の期日をカレンダーに登録</span>
               <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded-full font-bold">無料</span>
             </button>
 
@@ -267,6 +345,7 @@ export function ActionSelector({
           unit: revUnit,
           frequency: revFrequency || currentCriteria.frequency || 'daily',
           deadlineDate: revDeadline,
+          isRevision: true,
         }}
       />
     </div>

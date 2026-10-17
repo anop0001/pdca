@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Target, Trophy, AlertTriangle, Calendar, Activity } from 'lucide-react';
+import { Target, Trophy, AlertTriangle, Calendar, Activity, ClipboardX, Info } from 'lucide-react';
 
 interface CheckSummaryCardProps {
   planTitle: string;
@@ -22,6 +22,7 @@ interface CheckSummaryCardProps {
     achievedDaysCount: number;
   };
   isAchieved: boolean;
+  checkStatus?: 'achieved' | 'unachieved' | 'unrecorded';
 }
 
 export function CheckSummaryCard({
@@ -30,9 +31,12 @@ export function CheckSummaryCard({
   targetCriteria,
   actualStats,
   isAchieved,
+  checkStatus,
 }: CheckSummaryCardProps) {
   const operatorLabel =
     targetCriteria.operator === 'gte' ? '以上' : targetCriteria.operator === 'lte' ? '以下' : '一致';
+
+  const effectiveStatus = checkStatus || (actualStats.recordedDays === 0 ? 'unrecorded' : isAchieved ? 'achieved' : 'unachieved');
 
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
@@ -46,20 +50,28 @@ export function CheckSummaryCard({
       </h1>
 
       <div
-        className={`p-4 rounded-2xl border flex items-center justify-between shadow-sm transition-all ${
-          isAchieved
+        className={`p-4 rounded-2xl border flex flex-col gap-2.5 shadow-sm transition-all ${
+          effectiveStatus === 'achieved'
             ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+            : effectiveStatus === 'unrecorded'
+            ? 'bg-slate-50 border-slate-300 text-slate-800'
             : 'bg-amber-50 border-amber-300 text-amber-900'
         }`}
       >
         <div className="flex items-center gap-3">
           <div
             className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-              isAchieved ? 'bg-emerald-500 text-white' : 'bg-amber-500 text-white'
+              effectiveStatus === 'achieved'
+                ? 'bg-emerald-500 text-white'
+                : effectiveStatus === 'unrecorded'
+                ? 'bg-slate-600 text-white'
+                : 'bg-amber-500 text-white'
             }`}
           >
-            {isAchieved ? (
+            {effectiveStatus === 'achieved' ? (
               <Trophy className="w-6 h-6" />
+            ) : effectiveStatus === 'unrecorded' ? (
+              <ClipboardX className="w-6 h-6" />
             ) : (
               <AlertTriangle className="w-6 h-6" />
             )}
@@ -69,10 +81,23 @@ export function CheckSummaryCard({
               SYSTEM CHECK RESULT
             </span>
             <p className="text-lg font-black leading-tight">
-              {isAchieved ? '目標達成！おめでとうございます 🎉' : '未達成（改善のチャンスです） ⚠️'}
+              {effectiveStatus === 'achieved'
+                ? '目標達成！おめでとうございます 🎉'
+                : effectiveStatus === 'unrecorded'
+                ? '未記録（判定データなし） 📝'
+                : '未達成（改善のチャンスです） ⚠️'}
             </p>
           </div>
         </div>
+
+        {effectiveStatus === 'unrecorded' && (
+          <div className="p-2.5 rounded-xl bg-white/80 border border-slate-200 text-xs text-slate-600 flex items-start gap-1.5">
+            <Info className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+            <span>
+              評価期間中に実績が1日も入力されていませんでした。未記録をすべて失敗とみなすのではなく、まずは「記録の習慣化」や「通知設定」から改善していきましょう。
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3">

@@ -16,7 +16,8 @@ import {
   Calendar,
   Loader2,
   ChevronRight,
-  TrendingUp
+  TrendingUp,
+  ClipboardX
 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
@@ -463,47 +464,66 @@ export default function HistoryPage() {
                               </span>
 
                               {isTargetChanged && prevVer && (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-extrabold text-[10px]">
+                                <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-extrabold text-[10px] ${
+                                  ver.target_value > prevVer.target_value
+                                    ? 'bg-blue-50 text-blue-700 border border-blue-200'
+                                    : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                }`}>
                                   <span>{prevVer.target_value}{prevVer.unit}</span>
                                   <ArrowRight className="w-2.5 h-2.5" />
-                                  <span>{ver.target_value}{ver.unit} に調整</span>
+                                  <span>
+                                    {ver.target_value}{ver.unit}
+                                    {ver.target_value > prevVer.target_value ? '（引き上げ）' : '（引き下げ）'}
+                                  </span>
                                 </span>
                               )}
                             </div>
 
-                            {check && (
-                              <div className="mt-2.5 pt-2 border-t border-gray-200/70 space-y-1.5">
-                                <div className="flex items-center justify-between text-xs">
-                                  <span className="text-[11px] text-gray-500 font-medium">Check判定:</span>
-                                  {check.is_achieved ? (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
-                                      <CheckCircle2 className="w-3 h-3" />
-                                      目標達成 🎉
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
-                                      <AlertTriangle className="w-3 h-3" />
-                                      未達成 ⚠️
-                                    </span>
+                            {check && (() => {
+                              const isUnrecorded = check.actual_summary?.includes('未記録') || 
+                                check.actual_summary?.includes('記録 0') || 
+                                check.actual_summary?.includes('0日') ||
+                                check.actual_summary?.includes('記録なし');
+
+                              return (
+                                <div className="mt-2.5 pt-2 border-t border-gray-200/70 space-y-1.5">
+                                  <div className="flex items-center justify-between text-xs">
+                                    <span className="text-[11px] text-gray-500 font-medium">Check判定:</span>
+                                    {isUnrecorded ? (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-full">
+                                        <ClipboardX className="w-3 h-3 text-slate-500" />
+                                        未記録（データなし） 📝
+                                      </span>
+                                    ) : check.is_achieved ? (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full">
+                                        <CheckCircle2 className="w-3 h-3" />
+                                        目標達成 🎉
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-full">
+                                        <AlertTriangle className="w-3 h-3" />
+                                        未達成 ⚠️
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-gray-600 bg-white/70 p-1.5 rounded-lg border border-gray-100">
+                                    {check.actual_summary}
+                                  </p>
+
+                                  {action && (
+                                    <div className="flex items-start gap-1.5 text-[11px] text-gray-600 pt-0.5">
+                                      <span className="font-bold shrink-0 text-emerald-800">Action:</span>
+                                      <span>
+                                        <strong className="text-gray-800">
+                                          {ACTION_CONFIG[action.action_type]?.label || action.action_type}
+                                        </strong>
+                                        {action.reason && `（${action.reason}）`}
+                                      </span>
+                                    </div>
                                   )}
                                 </div>
-                                <p className="text-[11px] text-gray-600 bg-white/70 p-1.5 rounded-lg border border-gray-100">
-                                  {check.actual_summary}
-                                </p>
-
-                                {action && (
-                                  <div className="flex items-start gap-1.5 text-[11px] text-gray-600 pt-0.5">
-                                    <span className="font-bold shrink-0 text-emerald-800">Action:</span>
-                                    <span>
-                                      <strong className="text-gray-800">
-                                        {ACTION_CONFIG[action.action_type]?.label || action.action_type}
-                                      </strong>
-                                      {action.reason && `（${action.reason}）`}
-                                    </span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
+                              );
+                            })()}
                           </div>
                         </div>
                       );

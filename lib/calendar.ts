@@ -71,6 +71,7 @@ export interface CalendarEventOptions {
   timeSlot?: TimeSlot;
   customStartTime?: string; // 'HH:mm'
   customDurationMinutes?: number; // e.g. 30
+  isRevision?: boolean;
 }
 
 export const TIME_SLOT_CONFIG: Record<

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Calendar, Bell, ExternalLink, X, ShieldCheck, Clock, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { Calendar, Bell, ExternalLink, X, ShieldCheck, Clock, Check, Sparkles, RefreshCw, Info } from 'lucide-react';
 import {
   getGoogleCalendarUrl,
   type CalendarEventOptions,
@@ -84,6 +84,22 @@ export function CalendarReminderModal({
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {/* 改訂時の案内 */}
+        {options.isRevision && (
+          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 space-y-1">
+            <div className="flex items-center gap-1.5 font-bold text-amber-800">
+              <Calendar className="w-4 h-4 text-amber-600 shrink-0" />
+              <span>以前の予定の確認・変更について</span>
+            </div>
+            <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+              このPlanにはカレンダー登録用の予定があります。以前の予定を確認し、必要に応じて変更してください。
+            </p>
+            <p className="text-[10px] text-amber-700/80 leading-normal">
+              ※Googleカレンダー等の以前の予定は自動更新されません。カレンダー側で以前の予定をご確認・ご調整ください。
+            </p>
+          </div>
+        )}
 
         {/* モード切替タブ（行動ベース vs 締め切り日） */}
         <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 rounded-2xl">
