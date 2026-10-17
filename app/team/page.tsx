@@ -230,10 +230,18 @@ export default function TeamPage() {
           .select('id, user_id, role, member_name, created_at')
           .eq('organization_id', matchedOrg.id);
 
-        if (members && members.length > 0) {
+        // 管理者自身の個人PDCAはメンバー滞り管理から除外（配下メンバーのみ抽出）
+        const subordinateMembers = (members || []).filter(
+          (m: any) => m.user_id !== currentUserId && m.role !== 'admin'
+        );
+
+        if (subordinateMembers.length === 0) {
+          // 配下メンバーがいない場合は確実に空タスクとして同期（バッジ①の誤表示を防止）
+          sync([], cleanName, matchedOrg.invite_code, matchedOrg.id);
+        } else {
           // 各メンバーの最新Planと実績を取得
           const realTasks: TeamTask[] = [];
-          for (const m of members) {
+          for (const m of subordinateMembers) {
             const { data: plans } = await supabase
               .from('plans')
               .select(`
@@ -271,7 +279,10 @@ export default function TeamPage() {
             )[0];
 
             let taskStatus: 'check_pending' | 'revision_requested' | 'confirmed' = 'check_pending';
-            if (latestReview?.status === 'confirmed') {
+            if (!currentPlan) {
+              // まだ目標を作成していないメンバーは確認待ちにしない（順調扱い）
+              taskStatus = 'confirmed';
+            } else if (latestReview?.status === 'confirmed') {
               taskStatus = 'confirmed';
             } else if (latestReview?.status === 'revision_requested') {
               taskStatus = 'revision_requested';
@@ -284,16 +295,20 @@ export default function TeamPage() {
               planId: currentPlan?.id,
               userId: m.user_id,
               name: m.member_name || 'メンバー',
-              plan: ver?.action_plan || currentPlan?.title || '日次業務の目標達成',
+              plan: ver?.action_plan || currentPlan?.title || (currentPlan ? '日次業務の目標達成' : '目標設定中'),
               status: taskStatus,
-              actual: record ? `本日実績: ${record.actual_value ?? 0}${ver?.unit || ''}` : '初期サイクル進行中',
+              actual: record ? `本日実績: ${record.actual_value ?? 0}${ver?.unit || ''}` : (currentPlan ? '初期サイクル進行中' : '目標設定中'),
               comment: latestReview?.comment || undefined,
             });
           }
 
-          if (realTasks.length > 0) {
-            sync(realTasks, cleanName, matchedOrg.invite_code, matchedOrg.id);
-          }
+          sync(realTasks, cleanName, matchedOrg.invite_code, matchedOrg.id);
+        }
+      } else {
+        setTasks([]);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('pdca_team_tasks');
+          window.dispatchEvent(new Event('pdca_tasks_updated'));
         }
       }
     } catch (err) {
@@ -597,6 +612,7 @@ export default function TeamPage() {
       localStorage.removeItem('pdca_team_tasks');
       localStorage.removeItem('pdca_team_members');
       localStorage.removeItem('pdca_current_team_code');
+      window.dispatchEvent(new Event('pdca_tasks_updated'));
     }
     setOrgId(null);
     setTeamName('');
