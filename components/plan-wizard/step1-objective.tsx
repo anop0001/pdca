@@ -5,9 +5,11 @@ import { useFormContext } from 'react-hook-form';
 import { Target, Check } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
+import { useLiff } from '@/components/liff-provider';
 import type { PlanWizardFormData } from '@/lib/validations/plan';
 
 export function Step1Objective() {
+  const { isReady, user } = useLiff();
   const { register, watch, setValue, formState: { errors } } = useFormContext<PlanWizardFormData>();
   const [objectives, setObjectives] = useState<{ id: string; title: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -16,9 +18,11 @@ export function Step1Objective() {
   const selectedObjectiveId = watch('selectedObjectiveId');
 
   useEffect(() => {
+    if (!isReady) return;
+
     async function fetchObjectives() {
       try {
-        const currentUserId = await getCurrentUserId();
+        const currentUserId = await getCurrentUserId(user || undefined);
         if (!currentUserId) {
           setValue('objectiveMode', 'create');
           setLoading(false);
