@@ -76,8 +76,51 @@ export default function PlanCheckPage() {
           console.warn('Fetch Check Data Supabase warning:', error);
         }
 
+        // ローカルストレージ（pdca_local_records & pdca_local_plans）の実績レコードを取得
+        let localPlanRecords: any[] = [];
+        if (typeof window !== 'undefined') {
+          try {
+            const recRaw = localStorage.getItem('pdca_local_records');
+            if (recRaw) {
+              const recList = JSON.parse(recRaw);
+              localPlanRecords = recList.filter((r: any) => r.plan_id === planId);
+            }
+          } catch {}
+
+          try {
+            const plansRaw = localStorage.getItem('pdca_local_plans');
+            if (plansRaw) {
+              const pList = JSON.parse(plansRaw);
+              const matched = pList.find((p: any) => p.id === planId);
+              if (matched?.todayRecord) {
+                const todayStr = new Date().toISOString().split('T')[0];
+                if (!localPlanRecords.some((r) => r.record_date === todayStr)) {
+                  localPlanRecords.push({
+                    record_date: todayStr,
+                    actual_value: matched.todayRecord.actual_value,
+                    is_completed: matched.todayRecord.is_completed,
+                  });
+                }
+              }
+            }
+          } catch {}
+        }
+
         if (data) {
-          setPlanData(data as any);
+          const combinedRecords = [...(data.do_records || [])];
+          const existingDates = new Set(combinedRecords.map((r: any) => r.record_date));
+          for (const lr of localPlanRecords) {
+            if (!existingDates.has(lr.record_date)) {
+              combinedRecords.push(lr);
+              existingDates.add(lr.record_date);
+            } else {
+              const idx = combinedRecords.findIndex((r: any) => r.record_date === lr.record_date);
+              if (idx >= 0 && lr.actual_value !== undefined) {
+                combinedRecords[idx] = { ...combinedRecords[idx], ...lr };
+              }
+            }
+          }
+          setPlanData({ ...data, do_records: combinedRecords } as any);
         } else {
           setPlanData({
             id: planId,
@@ -97,7 +140,7 @@ export default function PlanCheckPage() {
                 start_date: new Date().toISOString().split('T')[0],
               },
             ],
-            do_records: [],
+            do_records: localPlanRecords,
           });
         }
       } catch (err: any) {
