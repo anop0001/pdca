@@ -5,13 +5,67 @@
 
 export type TimeSlot = 'morning' | 'noon' | 'evening' | 'night' | 'all_day' | 'custom';
 
+export type PlanFrequency = 'daily' | 'weekday' | 'weekdays' | 'weekly' | 'single';
+
+export interface FrequencyConfig {
+  id: string;
+  label: string;
+  badge: string;
+  tabLabel: string;
+  rruleFreq: string;
+  isRecurring: boolean;
+}
+
+export const FREQUENCY_CONFIG: Record<string, FrequencyConfig> = {
+  daily: {
+    id: 'daily',
+    label: '毎日',
+    badge: '毎日リピート',
+    tabLabel: '毎日の行動予定',
+    rruleFreq: 'FREQ=DAILY',
+    isRecurring: true,
+  },
+  weekday: {
+    id: 'weekday',
+    label: '平日のみ',
+    badge: '平日（月〜金）リピート',
+    tabLabel: '平日のみの行動予定',
+    rruleFreq: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+    isRecurring: true,
+  },
+  weekdays: {
+    id: 'weekdays',
+    label: '平日のみ',
+    badge: '平日（月〜金）リピート',
+    tabLabel: '平日のみの行動予定',
+    rruleFreq: 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR',
+    isRecurring: true,
+  },
+  weekly: {
+    id: 'weekly',
+    label: '毎週',
+    badge: '毎週リピート',
+    tabLabel: '毎週の行動予定',
+    rruleFreq: 'FREQ=WEEKLY',
+    isRecurring: true,
+  },
+  single: {
+    id: 'single',
+    label: '期日までに1度',
+    badge: '1度のみ実行',
+    tabLabel: '期日までの実行予定',
+    rruleFreq: '',
+    isRecurring: false,
+  },
+};
+
 export interface CalendarEventOptions {
   title: string;
   description?: string;
   deadlineDate?: string; // 'YYYY-MM-DD'
   targetValue?: number | string;
   unit?: string;
-  frequency?: string; // 'daily' | 'weekdays' | 'weekly' etc.
+  frequency?: string; // 'daily' | 'weekday' | 'weekdays' | 'weekly' | 'single'
   appUrl?: string;
   mode?: 'action' | 'deadline'; // default 'action' (行動ベース)
   timeSlot?: TimeSlot;
@@ -49,6 +103,9 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
 
   const originUrl = appUrl || (typeof window !== 'undefined' ? window.location.origin : 'https://pdca-mauve.vercel.app/');
 
+  const freqKey = frequency || 'daily';
+  const freqCfg = FREQUENCY_CONFIG[freqKey] || FREQUENCY_CONFIG.daily;
+
   // 今日のJST日付（YYYY-MM-DD）
   const now = new Date();
   const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
@@ -57,7 +114,7 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
   // タイトル
   const eventTitle = mode === 'deadline'
     ? `【PDCA評価期日】${title}`
-    : `【PDCA実行】${title}${targetValue ? ` (${targetValue}${unit})` : ''}`;
+    : `【PDCA実行】${title}${targetValue ? ` (${freqCfg.label} ${targetValue}${unit})` : ''}`;
 
   // 詳細説明
   const eventDetails = mode === 'deadline'
@@ -69,7 +126,8 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
       ].join('\n')
     : [
         `🎯 本日のPDCA行動目標: ${title}`,
-        targetValue ? `目標値: ${targetValue}${unit}` : '',
+        targetValue ? `目標値: ${freqCfg.label} ${targetValue}${unit}` : '',
+        deadlineDate ? `評価期日: ${deadlineDate}` : '',
         '',
         '行動を実行したら、PDCAアプリを開いて実績を入力しましょう！',
         '▼PDCA記録を開く👇',
@@ -91,10 +149,12 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
     const nd = String(nextDate.getDate()).padStart(2, '0');
     datesParam = `${startDateStr}/${ny}${nm}${nd}`;
   } else {
-    // 行動ベース（指定時間帯 or 終日 ＋ 締め切り日まで毎日リピート）
+    // 行動ベース（指定時間帯 or 終日 ＋ 実行頻度・締め切り日連動）
+    const targetStartDateStr = (freqCfg.id === 'single' && deadlineDate) ? deadlineDate : todayStr;
+
     if (timeSlot === 'all_day') {
-      const ymd = todayStr.replace(/-/g, '');
-      const nextDate = new Date(`${todayStr}T00:00:00+09:00`);
+      const ymd = targetStartDateStr.replace(/-/g, '');
+      const nextDate = new Date(`${targetStartDateStr}T00:00:00+09:00`);
       nextDate.setDate(nextDate.getDate() + 1);
       const nextYmd = nextDate.toISOString().slice(0, 10).replace(/-/g, '');
       datesParam = `${ymd}/${nextYmd}`;
@@ -110,7 +170,7 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
         durationMin = TIME_SLOT_CONFIG[timeSlot].duration;
       }
 
-      const startJst = new Date(`${todayStr}T${startTimeStr}:00+09:00`);
+      const startJst = new Date(`${targetStartDateStr}T${startTimeStr}:00+09:00`);
       const endJst = new Date(startJst.getTime() + durationMin * 60000);
 
       const startUtc = startJst.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
@@ -118,20 +178,18 @@ export function getGoogleCalendarUrl(options: CalendarEventOptions): string {
       datesParam = `${startUtc}/${endUtc}`;
     }
 
-    // 繰り返しルール (RRULE)
-    let freqRule = 'FREQ=DAILY';
-    if (frequency === 'weekdays') {
-      freqRule = 'FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR';
-    } else if (frequency === 'weekly') {
-      freqRule = 'FREQ=WEEKLY';
-    }
-
-    if (deadlineDate) {
-      const untilDate = new Date(`${deadlineDate}T23:59:59+09:00`);
-      const untilUtc = untilDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-      recurParam = `RRULE:${freqRule};UNTIL=${untilUtc}`;
+    // 繰り返しルール (RRULE) - 実行頻度と完全連動
+    if (freqCfg.isRecurring && freqCfg.rruleFreq) {
+      if (deadlineDate) {
+        const untilDate = new Date(`${deadlineDate}T23:59:59+09:00`);
+        const untilUtc = untilDate.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+        recurParam = `RRULE:${freqCfg.rruleFreq};UNTIL=${untilUtc}`;
+      } else {
+        recurParam = `RRULE:${freqCfg.rruleFreq}`;
+      }
     } else {
-      recurParam = `RRULE:${freqRule}`;
+      // 期日までに1度（繰り返しなし）
+      recurParam = null;
     }
   }
 
