@@ -15,6 +15,7 @@ interface LiffContextType {
     pictureUrl?: string;
   } | null;
   forceLogin: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const LiffContext = createContext<LiffContextType>({
@@ -23,6 +24,7 @@ const LiffContext = createContext<LiffContextType>({
   isReady: false,
   user: null,
   forceLogin: async () => {},
+  logout: async () => {},
 });
 
 export const useLiff = () => useContext(LiffContext);
@@ -43,6 +45,43 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
       await ensureSupabaseSession(user || undefined);
     } catch (e) {
       console.warn('forceLogin error:', e);
+    }
+  };
+
+  // ログアウト & 端末キャッシュ完全初期化処理
+  const logout = async () => {
+    try {
+      if (liffObject && liffObject.isLoggedIn()) {
+        try {
+          liffObject.logout();
+        } catch (liffErr) {
+          console.warn('liff.logout warning:', liffErr);
+        }
+      }
+      await supabase.auth.signOut();
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('pdca_line_user_id');
+        localStorage.removeItem('pdca_auth_uid');
+        localStorage.removeItem('pdca_user_name');
+        localStorage.removeItem('pdca_team_tasks');
+
+        // Supabaseセッションキーをすべてクリア
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('sb-') || key.includes('supabase') || key.startsWith('pdca_auth'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach((k) => localStorage.removeItem(k));
+
+        window.location.reload();
+      }
+    } catch (e) {
+      console.warn('logout error:', e);
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
     }
   };
 
@@ -138,7 +177,7 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <LiffContext.Provider value={{ liff: liffObject, liffError, isReady, user, forceLogin }}>
+    <LiffContext.Provider value={{ liff: liffObject, liffError, isReady, user, forceLogin, logout }}>
       {children}
     </LiffContext.Provider>
   );
