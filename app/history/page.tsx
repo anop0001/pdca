@@ -38,6 +38,15 @@ interface CheckRecord {
   actions?: ActionRecord[];
 }
 
+interface DoRecordItem {
+  id: string;
+  plan_id?: string;
+  plan_version_id?: string;
+  record_date: string;
+  actual_value?: number;
+  is_completed: boolean;
+}
+
 interface PlanVersionRecord {
   id: string;
   version_number: number;
@@ -56,6 +65,7 @@ interface PlanRecord {
   id: string;
   title: string;
   status: 'in_progress' | 'completed' | 'abandoned';
+  do_records?: DoRecordItem[];
   plan_versions: PlanVersionRecord[];
 }
 
@@ -64,6 +74,160 @@ interface ObjectiveGroup {
   title: string;
   status: string;
   plans: PlanRecord[];
+}
+
+function getTodayJSTString(): string {
+  const now = new Date();
+  const jst = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  const y = jst.getFullYear();
+  const m = String(jst.getMonth() + 1).padStart(2, '0');
+  const d = String(jst.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+export interface VersionStats {
+  achieved: number;
+  unachieved: number;
+  unrecorded: number;
+}
+
+function computeVersionStats(
+  ver: PlanVersionRecord,
+  idx: number,
+  allVersions: PlanVersionRecord[],
+  doRecords: DoRecordItem[] = []
+): VersionStats {
+  const todayStr = getTodayJSTString();
+  const isLatest = idx === allVersions.length - 1;
+
+  // 開始日
+  const startDateStr = ver.start_date || ver.created_at?.split('T')[0] || todayStr;
+
+  // 終了日（このバージョンの期間末尾）
+  let verEndDateStr = ver.deadline;
+  if (!verEndDateStr) {
+    const s = new Date(startDateStr);
+    s.setDate(s.getDate() + 7);
+    verEndDateStr = s.toISOString().split('T')[0];
+  }
+
+  // もし次のバージョンが存在する場合、次のバージョンの開始日を手前の上限とする
+  if (!isLatest && allVersions[idx + 1]) {
+    const nextVer = allVersions[idx + 1];
+    const nextStart = nextVer.start_date || nextVer.created_at?.split('T')[0];
+    if (nextStart && nextStart < verEndDateStr) {
+      verEndDateStr = nextStart;
+    }
+  }
+
+  // 評価対象の終了日（進行中の場合は今日まで、過去バージョンの場合はverEndDateStrまで）
+  const evalEndStr = isLatest
+    ? (todayStr < verEndDateStr ? todayStr : verEndDateStr)
+    : verEndDateStr;
+
+  // 日付リストを生成
+  const dates: string[] = [];
+  const start = new Date(startDateStr);
+  const end = new Date(evalEndStr);
+
+  if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && start <= end) {
+    const curr = new Date(start);
+    while (curr <= end) {
+      const y = curr.getFullYear();
+      const m = String(curr.getMonth() + 1).padStart(2, '0');
+      const d = String(curr.getDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${d}`;
+      const dayOfWeek = curr.getDay();
+
+      // 平日限定プランで土日の場合はスキップ（ただし記録がある場合は後ほどカウント）
+      const isWeekdayGoal = ver.frequency === 'weekday' || ver.frequency === '平日';
+      const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+      if (!isWeekdayGoal || !isWeekend) {
+        dates.push(dateStr);
+      }
+      curr.setDate(curr.getDate() + 1);
+    }
+  } else if (!isNaN(start.getTime())) {
+    dates.push(startDateStr);
+  }
+
+  // このバージョンに関連するレコードを抽出
+  const relevantRecords = doRecords.filter((r) => {
+    if (r.plan_version_id && r.plan_version_id === ver.id) return true;
+    if (r.record_date && r.record_date >= startDateStr && r.record_date <= verEndDateStr) return true;
+    return false;
+  });
+
+  const recordMap = new Map<string, DoRecordItem>();
+  for (const r of relevantRecords) {
+    if (r.record_date) {
+      // 1日に複数ある場合は完了済みのものを優先
+      if (!recordMap.has(r.record_date) || r.is_completed) {
+        recordMap.set(r.record_date, r);
+      }
+    }
+  }
+
+  let achieved = 0;
+  let unachieved = 0;
+  let unrecorded = 0;
+
+  const targetVal = Number(ver.target_value) || 1;
+
+  for (const d of dates) {
+    const rec = recordMap.get(d);
+    if (!rec) {
+      unrecorded++;
+    } else {
+      let isAch = false;
+      if (rec.is_completed) {
+        isAch = true;
+      } else if (ver.unit === '回' && targetVal === 1) {
+        isAch = Boolean(rec.is_completed);
+      } else {
+        const val = Number(rec.actual_value) || 0;
+        switch (ver.operator) {
+          case 'gte':
+            isAch = val >= targetVal;
+            break;
+          case 'lte':
+            isAch = val <= targetVal && val > 0;
+            break;
+          case 'eq':
+            isAch = val === targetVal;
+            break;
+        }
+      }
+      if (isAch) {
+        achieved++;
+      } else {
+        unachieved++;
+      }
+    }
+  }
+
+  // もしdatesリストに含まれていなかったが、relevantRecordsに記録がある日も加算
+  for (const [d, rec] of Array.from(recordMap.entries())) {
+    if (!dates.includes(d)) {
+      if (rec.is_completed) achieved++;
+      else unachieved++;
+    }
+  }
+
+  // 過去のCheckデータがあり、レコードが0件だった場合のフォールバック補正
+  if (achieved === 0 && unachieved === 0 && unrecorded === 0 && ver.checks && ver.checks.length > 0) {
+    const check = ver.checks[0];
+    if (check.is_achieved) {
+      achieved = 1;
+    } else if (check.actual_summary?.includes('未記録') || check.actual_summary?.includes('0日')) {
+      unrecorded = 1;
+    } else {
+      unachieved = 1;
+    }
+  }
+
+  return { achieved, unachieved, unrecorded };
 }
 
 export default function HistoryPage() {
@@ -107,6 +271,14 @@ export default function HistoryPage() {
               id,
               title,
               status
+            ),
+            do_records (
+              id,
+              plan_id,
+              plan_version_id,
+              record_date,
+              actual_value,
+              is_completed
             ),
             plan_versions (
               id,
@@ -164,6 +336,14 @@ export default function HistoryPage() {
                 title,
                 status
               ),
+              do_records (
+                id,
+                plan_id,
+                plan_version_id,
+                record_date,
+                actual_value,
+                is_completed
+              ),
               plan_versions (
                 id,
                 version_number,
@@ -214,6 +394,13 @@ export default function HistoryPage() {
               title: lp.objectiveTitle || '目標設定',
               status: 'active',
             },
+            do_records: lp.do_records || (lp.todayRecord ? [{
+              id: lp.todayRecord.id || 'rec-today',
+              plan_id: lp.id,
+              record_date: getTodayJSTString(),
+              actual_value: lp.todayRecord.actual_value,
+              is_completed: lp.todayRecord.is_completed,
+            }] : []),
             plan_versions: [
               {
                 id: lp.currentVersion?.id || 'v1',
@@ -257,6 +444,7 @@ export default function HistoryPage() {
           id: plan.id,
           title: plan.title,
           status: plan.status,
+          do_records: plan.do_records || [],
           plan_versions: sortedVersions,
         });
       }
@@ -413,6 +601,7 @@ export default function HistoryPage() {
                       const prevVer = idx > 0 ? plan.plan_versions[idx - 1] : null;
 
                       const isTargetChanged = prevVer && prevVer.target_value !== ver.target_value;
+                      const stats = computeVersionStats(ver, idx, plan.plan_versions, plan.do_records || []);
 
                       return (
                         <div key={ver.id} className="relative group">
@@ -477,6 +666,41 @@ export default function HistoryPage() {
                                   </span>
                                 </span>
                               )}
+                            </div>
+
+                            {/* 達成 / 未達 / 未入力 カウント表示 */}
+                            <div className="mt-2.5 pt-2 border-t border-gray-200/60">
+                              <div className="grid grid-cols-3 gap-1.5 sm:gap-2">
+                                <div className="bg-emerald-50/90 border border-emerald-200/90 rounded-xl py-1.5 px-2 text-center shadow-xs">
+                                  <div className="text-[10px] font-bold text-emerald-800 flex items-center justify-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                                    <span>達成</span>
+                                  </div>
+                                  <div className="text-xs font-black text-emerald-700 mt-0.5">
+                                    {stats.achieved}回
+                                  </div>
+                                </div>
+
+                                <div className="bg-amber-50/90 border border-amber-200/90 rounded-xl py-1.5 px-2 text-center shadow-xs">
+                                  <div className="text-[10px] font-bold text-amber-800 flex items-center justify-center gap-1">
+                                    <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                                    <span>未達</span>
+                                  </div>
+                                  <div className="text-xs font-black text-amber-700 mt-0.5">
+                                    {stats.unachieved}回
+                                  </div>
+                                </div>
+
+                                <div className="bg-slate-100/90 border border-slate-200 rounded-xl py-1.5 px-2 text-center shadow-xs">
+                                  <div className="text-[10px] font-bold text-slate-700 flex items-center justify-center gap-1">
+                                    <ClipboardX className="w-3 h-3 text-slate-500 shrink-0" />
+                                    <span>未入力</span>
+                                  </div>
+                                  <div className="text-xs font-black text-slate-700 mt-0.5">
+                                    {stats.unrecorded}回
+                                  </div>
+                                </div>
+                              </div>
                             </div>
 
                             {check && (() => {
