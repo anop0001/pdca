@@ -178,7 +178,10 @@ function computeVersionStats(
 
   // このバージョンに関連するレコードを抽出
   const relevantRecords = doRecords.filter((r) => {
-    if (r.plan_version_id && r.plan_version_id === ver.id) return true;
+    if (r.plan_version_id) {
+      return r.plan_version_id === ver.id;
+    }
+    // plan_version_idが無い旧レコード用のフォールバック（日付範囲）
     if (r.record_date && r.record_date >= startDateStr && r.record_date <= verEndDateStr) return true;
     return false;
   });
@@ -794,9 +797,17 @@ export default function HistoryPage() {
                               </span>
                             </div>
 
-                            <p className="text-xs font-bold text-gray-800 leading-snug">
-                              {ver.action_plan}
-                            </p>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-xs font-bold text-gray-800 leading-snug">
+                                {ver.action_plan}
+                              </p>
+                              <Link
+                                href={`/plans/${plan.id}/check`}
+                                className="shrink-0 inline-flex items-center gap-1 px-3 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 rounded-lg text-xs font-bold transition active:scale-95 shadow-xs"
+                              >
+                                <span>Check ➔</span>
+                              </Link>
+                            </div>
 
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                               <span className="text-gray-500">判定基準:</span>
@@ -880,17 +891,6 @@ export default function HistoryPage() {
                               </div>
                             )}
 
-                            {!check && isLatest && !isExpired && (
-                              <div className="mt-2 text-right">
-                                <Link
-                                  href={`/plans/${plan.id}/check`}
-                                  className="inline-flex items-center gap-1 text-[11px] text-emerald-700 hover:underline font-bold"
-                                >
-                                  <span>Check / 振り返りを行う</span>
-                                  <ArrowRight className="w-3 h-3" />
-                                </Link>
-                              </div>
-                            )}
 
                             {check && (() => {
                               return (
