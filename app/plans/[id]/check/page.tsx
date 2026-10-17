@@ -320,6 +320,35 @@ export default function PlanCheckPage() {
           .single();
 
         nextPlanVersionId = newVer?.id || null;
+
+        // ローカルPlanキャッシュも最新Verに更新 & 今日の実績を未入力にリセットして新カードを即時準備
+        if (typeof window !== 'undefined') {
+          try {
+            const rawPlans = localStorage.getItem('pdca_local_plans');
+            if (rawPlans) {
+              const pList = JSON.parse(rawPlans).map((p: any) => {
+                if (p.id === planData.id) {
+                  return {
+                    ...p,
+                    currentVersion: {
+                      id: newVer?.id || 'ver-' + Date.now(),
+                      version_number: nextVerNum,
+                      action_plan: revisionData.actionPlan,
+                      target_value: revisionData.targetValue,
+                      unit: revisionData.unit,
+                      operator: revisionData.operator,
+                      frequency: revisionData.frequency,
+                      deadline: revisionData.deadline,
+                    },
+                    todayRecord: null, // Ver.2用の新しいカードとして未入力で初期化
+                  };
+                }
+                return p;
+              });
+              localStorage.setItem('pdca_local_plans', JSON.stringify(pList));
+            }
+          } catch {}
+        }
       } else if (actionType === 'terminate') {
         await supabase
           .from('plans')
@@ -370,12 +399,18 @@ export default function PlanCheckPage() {
 
       if (actionType === 'alternative') {
         router.push(`/plans/new?objective_id=${planData.objective_id}`);
+      } else if (actionType === 'revise') {
+        router.push(`/?new_version=${currentVersion.version_number + 1}`);
       } else {
         router.push('/history?check_completed=true');
       }
     } catch (err: any) {
       console.warn('Confirm Action Warning:', err);
-      router.push('/history?check_completed=true');
+      if (actionType === 'revise') {
+        router.push(`/?new_version=${currentVersion.version_number + 1}`);
+      } else {
+        router.push('/history?check_completed=true');
+      }
     } finally {
       setIsSubmitting(false);
     }
