@@ -121,12 +121,25 @@ export default function NewPlanPage() {
 
       // 2. ローカルストレージにも確実にキャッシュ保存（オフラインやセッション未確立時でも即座に反映）
       if (typeof window !== 'undefined') {
+        let objectiveTitle = data.newObjectiveTitle?.trim() || '';
+        if (!objectiveTitle && finalObjectiveId) {
+          try {
+            const { data: objData } = await supabase
+              .from('objectives')
+              .select('title')
+              .eq('id', finalObjectiveId)
+              .maybeSingle();
+            if (objData?.title) objectiveTitle = objData.title;
+          } catch {}
+        }
+        if (!objectiveTitle) objectiveTitle = '目標設定';
+
         const localPlan = {
           id: newPlanId,
           userId: currentUserId,
           title: data.actionPlan,
           status: 'in_progress',
-          objectiveTitle: data.newObjectiveTitle || '目標設定',
+          objectiveTitle: objectiveTitle,
           currentVersion: {
             id: 'ver-' + Date.now(),
             version_number: 1,
