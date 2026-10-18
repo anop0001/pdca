@@ -59,6 +59,28 @@ export const FREQUENCY_CONFIG: Record<string, FrequencyConfig> = {
   },
 };
 
+export function formatFrequencyLabel(freq?: string): string {
+  if (!freq) return '毎日';
+  switch (freq) {
+    case 'weekday':
+    case 'weekdays':
+    case 'custom':
+    case '平日':
+    case '平日のみ':
+      return '平日のみ';
+    case 'weekly':
+    case '毎週':
+      return '毎週';
+    case 'single':
+    case '期日までに1度':
+      return '期日までに';
+    case 'daily':
+    case '毎日':
+    default:
+      return '毎日';
+  }
+}
+
 export interface CalendarEventOptions {
   title: string;
   description?: string;
