@@ -45,24 +45,75 @@ export function Step1Objective() {
     async function fetchObjectives() {
       try {
         const currentUserId = await getCurrentUserId(user || undefined);
-        if (!currentUserId) {
-          setValue('objectiveMode', 'create');
-          setLoading(false);
-          return;
+        let list: { id: string; title: string }[] = [];
+
+        if (currentUserId) {
+          const { data } = await supabase
+            .from('objectives')
+            .select('id, title')
+            .eq('user_id', currentUserId)
+            .eq('status', 'active')
+            .order('created_at', { ascending: false });
+
+          if (data && data.length > 0) {
+            list = [...data];
+          }
         }
 
-        const { data } = await supabase
-          .from('objectives')
-          .select('id, title')
-          .eq('user_id', currentUserId)
-          .eq('status', 'active')
-          .order('created_at', { ascending: false });
+        // ローカルストレージ内のPlanからも目的を抽出してマージ（オフライン/Supabase同期前の目的も確実に選択肢に出す）
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('pdca_local_plans');
+            if (raw) {
+              const localPlans = JSON.parse(raw);
+              for (const lp of localPlans) {
+                if (lp.objectiveTitle && lp.objectiveTitle !== '目的未設定') {
+                  const exists = list.some(
+                    (o) => o.title === lp.objectiveTitle || (lp.objective_id && o.id === lp.objective_id)
+                  );
+                  if (!exists) {
+                    list.push({
+                      id: lp.objective_id || `local-obj-${encodeURIComponent(lp.objectiveTitle)}`,
+                      title: lp.objectiveTitle,
+                    });
+                  }
+                }
+              }
+            }
+          } catch {}
+        }
 
-        if (data && data.length > 0) {
-          setObjectives(data);
-          if (!selectedObjectiveId) {
-            setValue('selectedObjectiveId', data[0].id);
+        setObjectives(list);
+
+        // URLパラメータからの事前選択判定 (?objective_id=xxx または ?objective_title=yyy)
+        if (typeof window !== 'undefined') {
+          const params = new URLSearchParams(window.location.search);
+          const paramObjId = params.get('objective_id');
+          const paramObjTitle = params.get('objective_title');
+
+          if (paramObjId || paramObjTitle) {
+            const matched = list.find(
+              (o) => (paramObjId && o.id === paramObjId) || (paramObjTitle && o.title === paramObjTitle)
+            );
+
+            if (matched) {
+              setValue('objectiveMode', 'select');
+              setValue('selectedObjectiveId', matched.id);
+            } else if (paramObjTitle) {
+              const newObjEntry = {
+                id: paramObjId || `local-obj-${encodeURIComponent(paramObjTitle)}`,
+                title: paramObjTitle,
+              };
+              list.unshift(newObjEntry);
+              setObjectives([...list]);
+              setValue('objectiveMode', 'select');
+              setValue('selectedObjectiveId', newObjEntry.id);
+            }
+          } else if (list.length > 0 && !selectedObjectiveId) {
+            setValue('selectedObjectiveId', list[0].id);
           }
+        } else if (list.length > 0 && !selectedObjectiveId) {
+          setValue('selectedObjectiveId', list[0].id);
         }
       } catch (e) {
         // エラー時も基本入力モードを維持
@@ -95,7 +146,7 @@ export function Step1Objective() {
               : 'text-gray-500 hover:text-gray-700'
           }`}
         >
-          目的を入力する (基本)
+          新しい目的を入力する
         </button>
         <button
           type="button"
@@ -107,7 +158,7 @@ export function Step1Objective() {
               : 'text-gray-500 hover:text-gray-700 disabled:opacity-40'
           }`}
         >
-          過去の目的から選ぶ {objectives.length > 0 ? `(${objectives.length})` : ''}
+          既存の目的に追加する {objectives.length > 0 ? `(${objectives.length})` : ''}
         </button>
       </div>
 
@@ -220,24 +271,48 @@ export function Step1Objective() {
         <div className="space-y-2">
           {loading ? (
             <div className="text-center py-6 text-xs text-gray-400">読み込み中...</div>
+          ) : objectives.length === 0 ? (
+            <div className="p-6 text-center rounded-xl border border-dashed border-gray-300 bg-gray-50/50 space-y-2">
+              <p className="text-xs text-gray-500">既存の大目的がまだ登録されていません。</p>
+              <button
+                type="button"
+                onClick={() => setValue('objectiveMode', 'create')}
+                className="text-xs font-bold text-emerald-600 hover:underline"
+              >
+                ＋ 新しい目的を入力する
+              </button>
+            </div>
           ) : (
-            objectives.map((obj) => {
-              const isSelected = selectedObjectiveId === obj.id;
-              return (
-                <div
-                  key={obj.id}
-                  onClick={() => setValue('selectedObjectiveId', obj.id, { shouldValidate: true })}
-                  className={`p-3.5 rounded-xl border cursor-pointer flex items-center justify-between transition active:scale-[0.99] ${
-                    isSelected
-                      ? 'border-emerald-500 bg-emerald-50/50 text-emerald-900 font-medium'
-                      : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-sm">{obj.title}</span>
-                  {isSelected && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
-                </div>
-              );
-            })
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-gray-600 mb-1">
+                追加先の大目的を選択してください：
+              </p>
+              {objectives.map((obj) => {
+                const isSelected = selectedObjectiveId === obj.id;
+                return (
+                  <div
+                    key={obj.id}
+                    onClick={() => setValue('selectedObjectiveId', obj.id, { shouldValidate: true })}
+                    className={`p-3.5 rounded-xl border cursor-pointer flex items-center justify-between gap-3 transition active:scale-[0.99] ${
+                      isSelected
+                        ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 font-medium ring-1 ring-emerald-300 shadow-2xs'
+                        : 'border-gray-200 bg-white text-gray-700 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="min-w-0 space-y-0.5">
+                      <span className="text-sm font-bold block break-words">{obj.title}</span>
+                      {isSelected && (
+                        <span className="text-[11px] font-semibold text-emerald-700 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-emerald-600" />
+                          この大目的に新しいPlan（取り組み）を追加します
+                        </span>
+                      )}
+                    </div>
+                    {isSelected && <Check className="w-5 h-5 text-emerald-600 shrink-0" />}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
