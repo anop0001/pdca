@@ -166,7 +166,7 @@ export default function NewPlanPage() {
 
         if (newPlan?.id) {
           newPlanId = newPlan.id;
-          const { error: verErr } = await supabase
+          let { error: verErr } = await supabase
             .from('plan_versions')
             .insert({
               plan_id: newPlan.id,
@@ -176,9 +176,27 @@ export default function NewPlanPage() {
               target_value: data.targetValue,
               unit: data.unit,
               operator: data.operator,
-              frequency: data.frequency === 'weekday' ? 'custom' : data.frequency,
+              frequency: data.frequency,
               deadline: data.deadline,
             });
+
+          if (verErr && data.frequency === 'weekday') {
+            // DBに旧ENUM制約がある場合の互換フォールバック
+            const retry = await supabase
+              .from('plan_versions')
+              .insert({
+                plan_id: newPlan.id,
+                user_id: currentUserId,
+                version_number: 1,
+                action_plan: data.actionPlan,
+                target_value: data.targetValue,
+                unit: data.unit,
+                operator: data.operator,
+                frequency: 'custom',
+                deadline: data.deadline,
+              });
+            verErr = retry.error;
+          }
 
           if (verErr) {
             console.warn('Plan version insert warning:', verErr);
@@ -216,7 +234,7 @@ export default function NewPlanPage() {
             target_value: data.targetValue,
             unit: data.unit,
             operator: data.operator,
-            frequency: data.frequency === 'weekday' ? 'custom' : data.frequency,
+            frequency: data.frequency,
             deadline: data.deadline || '',
           },
           todayRecord: null,

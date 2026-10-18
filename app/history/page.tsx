@@ -23,6 +23,7 @@ import {
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
 import { useLiff } from '@/components/liff-provider';
+import { formatFrequencyLabel } from '@/lib/calendar';
 
 interface ActionRecord {
   action_type: 'continue' | 'revise' | 'alternative' | 'terminate';
@@ -164,7 +165,12 @@ function computeVersionStats(
       const dayOfWeek = curr.getDay();
 
       // 平日限定プランで土日の場合はスキップ（ただし記録がある場合は後ほどカウント）
-      const isWeekdayGoal = ver.frequency === 'weekday' || ver.frequency === '平日';
+      const isWeekdayGoal =
+        ver.frequency === 'weekday' ||
+        ver.frequency === 'weekdays' ||
+        ver.frequency === 'custom' ||
+        ver.frequency === '平日' ||
+        ver.frequency === '平日のみ';
       const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
       if (!isWeekdayGoal || !isWeekend) {
@@ -812,7 +818,7 @@ export default function HistoryPage() {
                             <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
                               <span className="text-gray-500">判定基準:</span>
                               <span className="font-bold text-gray-800">
-                                毎日 {ver.target_value} {ver.unit}
+                                {formatFrequencyLabel(ver.frequency)} {ver.target_value} {ver.unit}
                                 {ver.operator === 'gte' ? ' 以上' : ver.operator === 'lte' ? ' 以下' : ' 一致'}
                               </span>
 
