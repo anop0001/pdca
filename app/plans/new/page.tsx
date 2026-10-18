@@ -90,6 +90,28 @@ export default function NewPlanPage() {
 
       let finalObjectiveId = data.selectedObjectiveId;
       let newPlanId = 'plan-' + Date.now();
+      let objectiveTitle = data.newObjectiveTitle?.trim() || '';
+
+      const isValidUUID = (val?: string | null) =>
+        Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+      // 既存目的からタイトルを特定
+      if (data.objectiveMode === 'select' && finalObjectiveId) {
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('pdca_local_plans');
+            if (raw) {
+              const lp = JSON.parse(raw).find(
+                (p: any) =>
+                  p.objective_id === finalObjectiveId ||
+                  `local-obj-${encodeURIComponent(p.objectiveTitle)}` === finalObjectiveId ||
+                  p.objectiveTitle === finalObjectiveId
+              );
+              if (lp?.objectiveTitle) objectiveTitle = lp.objectiveTitle;
+            }
+          } catch {}
+        }
+      }
 
       // 1. Supabaseへの保存を試みる
       try {
@@ -109,13 +131,28 @@ export default function NewPlanPage() {
           }
           if (newObj?.id) {
             finalObjectiveId = newObj.id;
+            objectiveTitle = data.newObjectiveTitle.trim();
+          }
+        } else if (data.objectiveMode === 'select' && finalObjectiveId && !isValidUUID(finalObjectiveId) && objectiveTitle) {
+          // ローカル作成の目的が未登録ならSupabaseに新規保存
+          const { data: newObj } = await supabase
+            .from('objectives')
+            .insert({
+              user_id: currentUserId,
+              title: objectiveTitle,
+              status: 'active',
+            })
+            .select('id')
+            .maybeSingle();
+          if (newObj?.id) {
+            finalObjectiveId = newObj.id;
           }
         }
 
         const { data: newPlan, error: planErr } = await supabase
           .from('plans')
           .insert({
-            objective_id: finalObjectiveId || null,
+            objective_id: isValidUUID(finalObjectiveId) ? finalObjectiveId : null,
             user_id: currentUserId,
             title: data.actionPlan,
             status: 'in_progress',
@@ -153,8 +190,7 @@ export default function NewPlanPage() {
 
       // 2. ローカルストレージにも確実にキャッシュ保存（オフラインやセッション未確立時でも即座に反映）
       if (typeof window !== 'undefined') {
-        let objectiveTitle = data.newObjectiveTitle?.trim() || '';
-        if (!objectiveTitle && finalObjectiveId) {
+        if (!objectiveTitle && finalObjectiveId && isValidUUID(finalObjectiveId)) {
           try {
             const { data: objData } = await supabase
               .from('objectives')
@@ -164,13 +200,14 @@ export default function NewPlanPage() {
             if (objData?.title) objectiveTitle = objData.title;
           } catch {}
         }
-        if (!objectiveTitle) objectiveTitle = '目標設定';
+        if (!objectiveTitle) objectiveTitle = '大目的未設定';
 
         const localPlan = {
           id: newPlanId,
           userId: currentUserId,
           title: data.actionPlan,
           status: 'in_progress',
+          objective_id: finalObjectiveId || undefined,
           objectiveTitle: objectiveTitle,
           currentVersion: {
             id: 'ver-' + Date.now(),
