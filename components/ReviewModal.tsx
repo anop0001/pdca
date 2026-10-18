@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { X, CheckCircle2, MessageSquare, AlertTriangle, Loader2 } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
+import { formatFrequencyLabel } from '@/lib/calendar';
 
 export interface ReviewTargetData {
   planId: string;
@@ -13,6 +14,7 @@ export interface ReviewTargetData {
   targetValue: number;
   unit: string;
   operator: 'gte' | 'lte' | 'eq';
+  frequency?: string;
   deadline: string;
   totalActual: number;
   recordedDays: number;
@@ -92,7 +94,7 @@ export function ReviewModal({ data, isOpen, onClose, onReviewSubmitted }: Review
             <span className="text-[10px] font-bold text-slate-400 block uppercase">1. Plan (目標・判定基準)</span>
             <p className="text-xs font-bold text-slate-900">{data.actionPlan}</p>
             <p className="text-[11px] text-slate-600">
-              基準: 毎日 {data.targetValue}{data.unit} {operatorLabel} (期日: {data.deadline || '未定'})
+              基準: {formatFrequencyLabel(data.frequency)} {data.targetValue}{data.unit} {operatorLabel} (期日: {data.deadline || '未定'})
             </p>
           </div>
 
