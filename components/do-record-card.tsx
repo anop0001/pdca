@@ -17,6 +17,7 @@ import {
   Calendar,
 } from 'lucide-react';
 import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
+import { formatFrequencyLabel } from '@/lib/calendar';
 
 export interface PlanWithDetails {
   id: string;
@@ -210,7 +211,7 @@ export function DoRecordCard({
         <p className="text-xs text-gray-500 flex items-center gap-1 min-w-0">
           <Flame className="w-3.5 h-3.5 text-orange-500 shrink-0" />
           <span className="truncate">
-            目標: 毎日 {version.target_value} {version.unit}
+            目標: {formatFrequencyLabel(version.frequency)} {version.target_value} {version.unit}
             {version.operator === 'gte' ? ' 以上' : version.operator === 'lte' ? ' 以下' : ' 一致'}
           </span>
         </p>
