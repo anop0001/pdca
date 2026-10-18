@@ -20,6 +20,7 @@ import { CalendarReminderModal } from '@/components/calendar-reminder-modal';
 
 export interface PlanWithDetails {
   id: string;
+  objective_id?: string;
   title: string;
   objectiveTitle: string;
   currentVersion: {
@@ -42,6 +43,8 @@ export interface PlanWithDetails {
 
 interface DoRecordCardProps {
   plan: PlanWithDetails;
+  hideObjectiveHeader?: boolean;
+  planIndex?: number;
   onSaveRecord: (
     planId: string,
     versionId: string,
@@ -55,6 +58,8 @@ interface DoRecordCardProps {
 
 export function DoRecordCard({
   plan,
+  hideObjectiveHeader = false,
+  planIndex,
   onSaveRecord,
   onResetRecord,
   onEdit,
@@ -146,15 +151,21 @@ export function DoRecordCard({
 
   return (
     <div className={`p-4 rounded-2xl border transition-all duration-300 ${cardBgClass}`}>
-      {/* 1行目: 目標タグ ＆ 達成ステータスバッジ */}
+      {/* 1行目: 目標タグ (または取り組み番号) ＆ 達成ステータスバッジ */}
       <div className="flex items-center justify-between mb-2 gap-2">
-        <span
-          className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 max-w-[70%] truncate"
-          title={plan.objectiveTitle}
-        >
-          <Target className="w-3 h-3 text-emerald-600 shrink-0" />
-          <span className="truncate">{plan.objectiveTitle}</span>
-        </span>
+        {hideObjectiveHeader ? (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold text-emerald-800 bg-emerald-100/70 border border-emerald-200/60">
+            取り組み {typeof planIndex === 'number' ? planIndex + 1 : ''}
+          </span>
+        ) : (
+          <span
+            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 text-gray-600 max-w-[70%] truncate"
+            title={plan.objectiveTitle}
+          >
+            <Target className="w-3 h-3 text-emerald-600 shrink-0" />
+            <span className="truncate">{plan.objectiveTitle}</span>
+          </span>
+        )}
 
         <div className="flex items-center gap-1.5 shrink-0">
           {currentStatus === 'achieved' && (
