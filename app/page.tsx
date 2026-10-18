@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2, CheckCircle2, AlertCircle, HelpCircle } from 'lucide-react';
+import { Plus, Calendar, Sparkles, RefreshCw, X, Pencil, Trash2, CheckCircle2, AlertCircle, HelpCircle, Target } from 'lucide-react';
 import { supabase } from '@/lib/supabase/client';
 import { getCurrentUserId } from '@/lib/supabase/auth';
 import { useLiff } from '@/components/liff-provider';
@@ -135,6 +135,7 @@ export default function HomePage() {
             user_id,
             title,
             status,
+            objective_id,
             objectives ( id, title ),
             plan_versions (
               id,
@@ -219,6 +220,7 @@ export default function HomePage() {
 
             return {
               id: p.id,
+              objective_id: p.objective_id || p.objectives?.id || undefined,
               title: p.title,
               objectiveTitle: p.objectives?.title || '目的未設定',
               currentVersion: {
@@ -636,6 +638,31 @@ export default function HomePage() {
   const unrecordedCount = plans.filter((p) => !p.todayRecord).length;
   const totalCount = plans.length;
 
+  interface ObjectiveGroup {
+    id: string;
+    title: string;
+    plans: PlanWithDetails[];
+  }
+
+  // 大目的(1)に対して複数の取り組みPlan(N)をグループ化
+  const objectiveGroups = useMemo(() => {
+    const map = new Map<string, ObjectiveGroup>();
+
+    for (const plan of plans) {
+      const groupKey = plan.objective_id || plan.objectiveTitle || 'default-objective';
+      if (!map.has(groupKey)) {
+        map.set(groupKey, {
+          id: plan.objective_id || '',
+          title: plan.objectiveTitle || '大目的未設定',
+          plans: [],
+        });
+      }
+      map.get(groupKey)!.plans.push(plan);
+    }
+
+    return Array.from(map.values());
+  }, [plans]);
+
   return (
     <div className="max-w-md mx-auto space-y-5 pb-8 animate-in fade-in duration-200">
       <div className="flex items-end justify-between pt-1">
@@ -770,17 +797,68 @@ export default function HomePage() {
           </div>
         </div>
       ) : (
-        <div className="space-y-3">
-          {plans.map((plan) => (
-            <DoRecordCard
-              key={plan.id}
-              plan={plan}
-              onSaveRecord={handleSaveRecord}
-              onResetRecord={handleResetRecord}
-              onEdit={handleOpenEdit}
-              onDelete={handleDeletePlan}
-            />
-          ))}
+        <div className="space-y-5">
+          {objectiveGroups.map((group) => {
+            const groupAchieved = group.plans.filter((p) => p.todayRecord?.is_completed).length;
+            const groupTotal = group.plans.length;
+
+            return (
+              <section
+                key={group.id || group.title}
+                className="bg-white/95 border border-gray-200/90 rounded-2xl p-4 shadow-xs space-y-3.5 transition-all"
+              >
+                {/* 大目的ヘッダー */}
+                <div className="flex items-start justify-between gap-3 border-b border-gray-100 pb-3">
+                  <div className="space-y-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200/60 shadow-2xs">
+                        <Target className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        大目的
+                      </span>
+                      <span className="text-[11px] font-semibold text-gray-500">
+                        取り組み {groupTotal}件
+                        {groupTotal > 0 && (
+                          <span className="ml-1 text-emerald-700 font-bold">
+                            (達成 {groupAchieved}/{groupTotal})
+                          </span>
+                        )}
+                      </span>
+                    </div>
+
+                    <h2 className="text-sm font-extrabold text-gray-900 leading-snug break-words pt-0.5">
+                      {group.title}
+                    </h2>
+                  </div>
+
+                  {/* 「＋ Plan追加」ボタン */}
+                  <Link
+                    href={`/plans/new?${group.id ? `objective_id=${encodeURIComponent(group.id)}&` : ''}objective_title=${encodeURIComponent(group.title)}`}
+                    className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 active:scale-95 text-emerald-700 hover:text-emerald-800 border border-emerald-200/80 rounded-xl text-xs font-bold transition shadow-2xs"
+                    title="この大目的に新しいPlanを追加"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Plan追加</span>
+                  </Link>
+                </div>
+
+                {/* この大目的に紐づく複数の取り組み（Planカード群） */}
+                <div className="space-y-3">
+                  {group.plans.map((plan, idx) => (
+                    <DoRecordCard
+                      key={plan.id}
+                      plan={plan}
+                      planIndex={idx}
+                      hideObjectiveHeader={true}
+                      onSaveRecord={handleSaveRecord}
+                      onResetRecord={handleResetRecord}
+                      onEdit={handleOpenEdit}
+                      onDelete={handleDeletePlan}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })}
         </div>
       )}
 
